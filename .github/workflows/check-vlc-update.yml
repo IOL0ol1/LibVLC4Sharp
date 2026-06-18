@@ -1,0 +1,113 @@
+name: Check VLC Headers
+
+# Runs daily. Regenerates the P/Invoke bindings from the latest VLC headers and,
+# if the generated interop file actually changed, derives a version from the VLC
+# header macros (libvlc_version.h) as MAJOR.MINOR.REVISION-nightly.<UTC-date>,
+# commits the regenerated bindings + bumped version, tags it, and invokes the
+# reusable NuGet publish workflow.
+#
+# Detection is "regenerate-and-diff": it triggers on changes that affect the
+# generated binding surface, ignoring header edits that don't (comments, etc.).
+on:
+  schedule:
+    - cron: '0 3 * * *'   # daily at 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write   # allows the reusable publish workflow to use trusted publishing (OIDC)
+
+jobs:
+  check:
+    runs-on: windows-latest
+    outputs:
+      updated: ${{ steps.diff.outputs.updated }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      # Fetches the latest VLC include/vlc headers into tools/.vlc and regenerates
+      # src/LibVLCSharp.Core/Generated/LibVLC.Interop.g.cs via ClangSharp.
+      - name: Regenerate bindings from latest VLC headers
+        run: ./tools/generate.ps1
+        shell: pwsh
+
+      - name: Detect binding changes
+        id: diff
+        shell: pwsh
+        run: |
+          # .gitattributes (* text=auto) normalizes line endings, so this only
+          # reports real content changes, not CRLF/LF noise.
+          $changed = git status --porcelain -- src/LibVLCSharp.Core/Generated
+          if ($changed) {
+            Write-Host "Bindings changed:`n$changed"
+            "updated=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host 'No binding changes; nothing to publish.'
+            "updated=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Derive version from VLC headers
+        id: version
+        if: steps.diff.outputs.updated == 'true'
+        shell: pwsh
+        run: |
+          $header = 'tools/.vlc/include/vlc/libvlc_version.h'
+          if (-not (Test-Path $header)) { throw "Not found: $header" }
+          $text = Get-Content $header -Raw
+          function Get-Macro([string]$name) {
+            # VLC headers write the macros as "# define LIBVLC_VERSION_MAJOR (4)"
+            # (note the space after '#'), so allow optional whitespace there.
+            if ($text -match "#\s*define\s+$name\s*\(?\s*(\d+)") { return [int]$Matches[1] }
+            throw "Macro $name not found in libvlc_version.h"
+          }
+          $major = Get-Macro 'LIBVLC_VERSION_MAJOR'
+          $minor = Get-Macro 'LIBVLC_VERSION_MINOR'
+          $rev   = Get-Macro 'LIBVLC_VERSION_REVISION'
+          $date  = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
+          $version = "$major.$minor.$rev-nightly.$date"
+          Write-Host "Derived version: $version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+          # Write the version into Directory.Build.props so the package picks it up.
+          $props = 'Directory.Build.props'
+          $content = Get-Content $props -Raw
+          $content = $content -replace '<Version>[^<]*</Version>', "<Version>$version</Version>"
+          Set-Content -Path $props -Value $content -NoNewline
+
+      - name: Commit, tag and push
+        if: steps.diff.outputs.updated == 'true'
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/LibVLCSharp.Core/Generated Directory.Build.props
+          git commit -m "chore: regenerate bindings for updated VLC headers ($version)"
+          git tag "v$version"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "v$version"
+
+  publish:
+    needs: check
+    if: needs.check.outputs.updated == 'true'
+    # Build & publish the just-tagged commit (the GITHUB_TOKEN that pushed the tag
+    # cannot trigger the tag-push workflow, so we invoke publish directly here and
+    # point it at the new tag).
+    # Trusted publishing needs id-token: write in the called workflow; grant it here.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/nuget-publish.yml
+    with:
+      ref: v${{ needs.check.outputs.version }}

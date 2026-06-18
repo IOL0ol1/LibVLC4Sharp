@@ -1,0 +1,36 @@
+<Project>
+  <PropertyGroup>
+    <Version>4.0.0-nightly.20260618</Version>
+    <Authors>IOL0ol1</Authors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PackageTags>vlc, libvlc, libvlcsharp</PackageTags>
+    <PackageProjectUrl>https://github.com/IOL0ol1/LibVLC.AutoGen</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)nupkgs</PackageOutputPath>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+
+    <!-- Ship XML docs (the public surface is heavily documented); CS1591 is suppressed because the
+         generated interop / alias members aren't all individually documented. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- SourceLink + symbols for debuggable packages. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <!-- Pack the shared icon/readme for every packable project. -->
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>LibVLCSharp.WPF</RootNamespace>
+    <AssemblyName>LibVLCSharp.WPF</AssemblyName>
+    <PackageId>LibVLC4Sharp.WPF</PackageId>
+    <Description>[unofficial] WPF VideoView for LibVLC 4.x using libvlc_video_set_output_callbacks + D3DImage — airspace-free GPU rendering.</Description>
+    <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LibVLCSharp.Core\LibVLCSharp.Core.csproj" />
+  </ItemGroup>
+
+</Project>
