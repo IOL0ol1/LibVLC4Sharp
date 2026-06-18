@@ -74,8 +74,8 @@ jobs:
           $major = Get-Macro 'LIBVLC_VERSION_MAJOR'
           $minor = Get-Macro 'LIBVLC_VERSION_MINOR'
           $rev   = Get-Macro 'LIBVLC_VERSION_REVISION'
-          $date  = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
-          $version = "$major.$minor.$rev-nightly.$date"
+          $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmm')
+          $version = "$major.$minor.$rev-nightly.$stamp"
           Write-Host "Derived version: $version"
           "version=$version" >> $env:GITHUB_OUTPUT
 
