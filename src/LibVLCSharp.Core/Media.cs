@@ -30,6 +30,16 @@ namespace LibVLCSharp.Core
         public Media(IntPtr handle) : base(handle) { }
 
         /// <summary>
+        /// Wraps a native handle. When <paramref name="addRef"/> is <c>false</c> the media is a borrowed
+        /// view that is never released and is valid only for as long as its owner keeps it alive
+        /// (e.g. a media obtained from <see cref="MediaEventArgs.GetMedia"/> with
+        /// <c>addRef: false</c>, valid only inside the event handler). Do not dispose a borrowed media.
+        /// </summary>
+        /// <param name="handle">Native <c>libvlc_media_t*</c>.</param>
+        /// <param name="addRef"><c>true</c> to retain ownership and release on dispose; <c>false</c> for a borrowed view.</param>
+        public Media(IntPtr handle, bool addRef) : base(handle, addRef) { }
+
+        /// <summary>
         /// Creates a media from a media resource location, for instance a valid URL.
         /// <c>libvlc_media_new_location</c>.
         /// </summary>
@@ -573,11 +583,11 @@ namespace LibVLCSharp.Core
                 case libvlc_event_e.libvlc_MediaParsedChanged:
                     { var h = _parsed; if (h != null) h(this, new ParsedChangedEventArgs((MediaParsedStatus)e->u.media_parsed_changed.new_status)); break; }
                 case libvlc_event_e.libvlc_MediaSubItemAdded:
-                    { var h = _subItemAdded; if (h != null) h(this, new MediaEventArgs(NativeWrap.Media(e->u.media_subitem_added.new_child))); break; }
+                    { var h = _subItemAdded; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_subitem_added.new_child)); break; }
                 case libvlc_event_e.libvlc_MediaSubItemTreeAdded:
-                    { var h = _subItemTreeAdded; if (h != null) h(this, new MediaEventArgs(NativeWrap.Media(e->u.media_subitemtree_added.item))); break; }
+                    { var h = _subItemTreeAdded; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_subitemtree_added.item)); break; }
                 case libvlc_event_e.libvlc_MediaThumbnailGenerated:
-                    { var h = _thumbnailGenerated; if (h != null) h(this, new ThumbnailGeneratedEventArgs(NativeWrap.Picture(e->u.media_thumbnail_generated.p_thumbnail))); break; }
+                    { var h = _thumbnailGenerated; if (h != null) h(this, new ThumbnailGeneratedEventArgs((IntPtr)e->u.media_thumbnail_generated.p_thumbnail)); break; }
                 case libvlc_event_e.libvlc_MediaAttachedThumbnailsFound:
                     { var h = _attachedThumbnailsFound; if (h != null) h(this, new AttachedThumbnailsFoundEventArgs((IntPtr)e->u.media_attached_thumbnails_found.thumbnails)); break; }
             }
@@ -611,21 +621,21 @@ namespace LibVLCSharp.Core
             remove => Events.Detach(ref _parsed, value, libvlc_event_e.libvlc_MediaParsedChanged);
         }
 
-        /// <summary><c>libvlc_MediaSubItemAdded</c> — a sub-item was added (owning <see cref="Media"/>; dispose it).</summary>
+        /// <summary><c>libvlc_MediaSubItemAdded</c> — a sub-item was added. Call <see cref="MediaEventArgs.GetMedia"/> (default retains).</summary>
         public event EventHandler<MediaEventArgs> SubItemAdded
         {
             add => Events.Attach(ref _subItemAdded, value, libvlc_event_e.libvlc_MediaSubItemAdded);
             remove => Events.Detach(ref _subItemAdded, value, libvlc_event_e.libvlc_MediaSubItemAdded);
         }
 
-        /// <summary><c>libvlc_MediaSubItemTreeAdded</c> — a sub-item tree was added.</summary>
+        /// <summary><c>libvlc_MediaSubItemTreeAdded</c> — a sub-item tree was added. Call <see cref="MediaEventArgs.GetMedia"/>.</summary>
         public event EventHandler<MediaEventArgs> SubItemTreeAdded
         {
             add => Events.Attach(ref _subItemTreeAdded, value, libvlc_event_e.libvlc_MediaSubItemTreeAdded);
             remove => Events.Detach(ref _subItemTreeAdded, value, libvlc_event_e.libvlc_MediaSubItemTreeAdded);
         }
 
-        /// <summary><c>libvlc_MediaThumbnailGenerated</c> — a requested thumbnail is ready (owning <see cref="Picture"/>; dispose it).</summary>
+        /// <summary><c>libvlc_MediaThumbnailGenerated</c> — a requested thumbnail is ready. Call <see cref="ThumbnailGeneratedEventArgs.GetThumbnail"/> (default retains).</summary>
         public event EventHandler<ThumbnailGeneratedEventArgs> ThumbnailGenerated
         {
             add => Events.Attach(ref _thumbnailGenerated, value, libvlc_event_e.libvlc_MediaThumbnailGenerated);

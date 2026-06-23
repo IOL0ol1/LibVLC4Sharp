@@ -12,14 +12,14 @@ namespace LibVLCSharp.Core
         public Picture(IntPtr handle) : base(handle) { }
 
         /// <summary>
-        /// Wraps a native handle. When <paramref name="owns"/> is <c>false</c> the picture is a borrowed
+        /// Wraps a native handle. When <paramref name="addRef"/> is <c>false</c> the picture is a borrowed
         /// view that is never released and is valid only for as long as its owner keeps it alive
         /// (e.g. a picture obtained from <see cref="AttachedThumbnailsFoundEventArgs.GetThumbnails"/> with
         /// <c>owner: false</c>, valid only inside the event handler). Do not dispose a borrowed picture.
         /// </summary>
         /// <param name="handle">Native <c>libvlc_picture_t*</c>.</param>
-        /// <param name="owns"><c>true</c> to retain ownership and release on dispose; <c>false</c> for a borrowed view.</param>
-        public Picture(IntPtr handle, bool owns) : base(handle, owns) { }
+        /// <param name="addRef"><c>true</c> to retain ownership and release on dispose; <c>false</c> for a borrowed view.</param>
+        public Picture(IntPtr handle, bool addRef) : base(handle, addRef) { }
 
         /// <summary>Implicit conversion to the native <c>libvlc_picture_t*</c> (null for a null picture).</summary>
         public static implicit operator libvlc_picture_t*(Picture? picture) =>
@@ -57,7 +57,7 @@ namespace LibVLCSharp.Core
         /// Returns the image internal buffer, including potential padding. <c>libvlc_picture_get_buffer</c>.
         /// </summary>
         /// <remarks>
-        /// The picture owns the returned buffer; do not modify or free it. The span is valid only
+        /// The picture addRef the returned buffer; do not modify or free it. The span is valid only
         /// while this <see cref="Picture"/> is alive.
         /// </remarks>
         /// <returns>A read-only span over the internal picture buffer.</returns>

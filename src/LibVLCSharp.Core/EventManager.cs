@@ -67,32 +67,6 @@ namespace LibVLCSharp.Core
         }
     }
 
-    /// <summary>
-    /// Wraps the borrowed native pointers carried by event payloads. libvlc owns the pointer for the
-    /// duration of the callback, so each is retained (+1) before wrapping; the handler receives an
-    /// owning wrapper it may keep and must dispose.
-    /// </summary>
-    internal static unsafe class NativeWrap
-    {
-        public static Media? Media(libvlc_media_t* p)
-        {
-            if (p == null) return null;
-            return new Media((IntPtr)libvlc_media_retain(p));
-        }
-
-        public static Picture? Picture(libvlc_picture_t* p)
-        {
-            if (p == null) return null;
-            return new Picture((IntPtr)libvlc_picture_retain(p));
-        }
-
-        public static RendererItem? Renderer(libvlc_renderer_item_t* p)
-        {
-            if (p == null) return null;
-            return new RendererItem((IntPtr)libvlc_renderer_item_hold(p));
-        }
-    }
-
     // ----------------------------------------------------------------------------------------------
     // Event payloads. All are readonly structs delivered through EventHandler<T> (no heap allocation:
     // T is a generic type argument, so the struct is not boxed). Payload-less events use the plain
@@ -125,17 +99,39 @@ namespace LibVLCSharp.Core
         public ParsedChangedEventArgs(MediaParsedStatus status) => Status = status;
     }
 
-    /// <summary>Payload of <see cref="Media.ThumbnailGenerated"/>.</summary>
+    /// <summary>
+    /// Payload of <see cref="Media.ThumbnailGenerated"/>. Wraps the borrowed
+    /// <c>libvlc_picture_t*</c> that is valid only for the duration of the event
+    /// handler — call <see cref="GetThumbnail"/> inside the handler.
+    /// </summary>
     public readonly struct ThumbnailGeneratedEventArgs
     {
-        /// <summary>The generated thumbnail (owning wrapper; dispose when done), or null.</summary>
-        public readonly Picture? Thumbnail;
-        public ThumbnailGeneratedEventArgs(Picture? thumbnail) => Thumbnail = thumbnail;
+        /// <summary>Borrowed native <c>libvlc_picture_t*</c>; valid only for the duration of the event.</summary>
+        private readonly IntPtr thumbnail;
+        public ThumbnailGeneratedEventArgs(IntPtr thumbnail) => this.thumbnail = thumbnail;
+
+        /// <summary>
+        /// Returns the generated thumbnail.
+        /// <para>
+        /// When <paramref name="addRef"/> is <c>true</c> (default) the <see cref="Picture"/> is retained
+        /// (+1) and may be kept after the handler returns; the caller must dispose it. When
+        /// <c>false</c> the <see cref="Picture"/> is a non-owning view valid only inside the handler:
+        /// do not dispose it and do not keep a reference past the handler.
+        /// </para>
+        /// </summary>
+        public unsafe Picture? GetThumbnail(bool addRef = true)
+        {
+            var p = (libvlc_picture_t*)thumbnail;
+            if (p == null) return null;
+            return addRef
+                ? new Picture((IntPtr)libvlc_picture_retain(p))
+                : new Picture((IntPtr)p, addRef: false);
+        }
     }
 
     /// <summary>
     /// Payload of <see cref="Media.AttachedThumbnailsFound"/>. Wraps the borrowed
-    /// <c>libvlc_picture_list_t*</c> that libvlc owns and frees once the event handler returns, so this
+    /// <c>libvlc_picture_list_t*</c> that libvlc addRef and frees once the event handler returns, so this
     /// payload is only meaningful inside the handler — call <see cref="GetThumbnails"/> there.
     /// </summary>
     public readonly struct AttachedThumbnailsFoundEventArgs
@@ -165,18 +161,40 @@ namespace LibVLCSharp.Core
                 var pic = libvlc_picture_list_at(list, new UIntPtr((uint)i)); // borrowed
                 pictures[i] = owner
                     ? new Picture((IntPtr)libvlc_picture_retain(pic))         // own a +1 ref
-                    : new Picture((IntPtr)pic, owns: false);                  // borrowed view
+                    : new Picture((IntPtr)pic, addRef: false);                  // borrowed view
             }
             return pictures;
         }
     }
 
-    /// <summary>Payload of events that carry a single <see cref="Core.Media"/> (sub-items, media changes).</summary>
+    /// <summary>
+    /// Payload of events that carry a single <see cref="Core.Media"/> (sub-items, media changes).
+    /// Wraps the borrowed <c>libvlc_media_t*</c> that is valid only for the duration of the event
+    /// handler — call <see cref="GetMedia"/> inside the handler.
+    /// </summary>
     public readonly struct MediaEventArgs
     {
-        /// <summary>The media (owning wrapper; dispose when done), or null.</summary>
-        public readonly Media? Media;
-        public MediaEventArgs(Media? media) => Media = media;
+        /// <summary>Borrowed native <c>libvlc_media_t*</c>; valid only for the duration of the event.</summary>
+        private readonly IntPtr media;
+        public MediaEventArgs(IntPtr media) => this.media = media;
+
+        /// <summary>
+        /// Returns the media.
+        /// <para>
+        /// When <paramref name="addRef"/> is <c>true</c> (default) the <see cref="Core.Media"/> is retained
+        /// (+1) and may be kept after the handler returns; the caller must dispose it. When
+        /// <c>false</c> the <see cref="Core.Media"/> is a non-owning view valid only inside the handler:
+        /// do not dispose it and do not keep a reference past the handler.
+        /// </para>
+        /// </summary>
+        public unsafe Media? GetMedia(bool addRef = true)
+        {
+            var p = (libvlc_media_t*)media;
+            if (p == null) return null;
+            return addRef
+                ? new Media((IntPtr)libvlc_media_retain(p))
+                : new Media((IntPtr)p, addRef: false);
+        }
     }
 
     // --- MediaPlayer ---
@@ -253,14 +271,35 @@ namespace LibVLCSharp.Core
         public ChapterChangedEventArgs(int chapter) => Chapter = chapter;
     }
 
-    /// <summary>Payload of <see cref="MediaPlayer.TitleSelectionChanged"/>.</summary>
+    /// <summary>
+    /// Payload of <see cref="MediaPlayer.TitleSelectionChanged"/>. Wraps the borrowed
+    /// <c>const libvlc_title_description_t*</c> that is valid only for the duration of the event
+    /// handler — call <see cref="GetTitleDescription"/> inside the handler.
+    /// </summary>
     public readonly struct TitleSelectionChangedEventArgs
     {
-        /// <summary>Native <c>const libvlc_title_description_t*</c> of the selected title.</summary>
-        public readonly IntPtr Title;
+        /// <summary>Borrowed native <c>const libvlc_title_description_t*</c>; valid only for the duration of the event.</summary>
+        private readonly IntPtr title;
         /// <summary>Selected title index.</summary>
         public readonly int Index;
-        public TitleSelectionChangedEventArgs(IntPtr title, int index) { Title = title; Index = index; }
+        public TitleSelectionChangedEventArgs(IntPtr title, int index) { this.title = title; Index = index; }
+
+        /// <summary>
+        /// Returns a managed <see cref="TitleDescription"/> by reading the borrowed native pointer.
+        /// Must be called inside the event handler — the underlying pointer is only valid for the
+        /// duration of the callback.
+        /// </summary>
+        /// <returns>A <see cref="TitleDescription"/> with the title's name, duration, and raw flags,
+        /// or <see langword="null"/> if the native pointer is null.</returns>
+        public unsafe TitleDescription? GetTitleDescription()
+        {
+            var td = (libvlc_title_description_t*)title;
+            if (td == null) return null;
+            return new TitleDescription(
+                ((IntPtr)td->psz_name).GetUtf8(),
+                td->i_duration,
+                td->i_flags);
+        }
     }
 
     /// <summary>Payload of <see cref="MediaPlayer.AudioVolume"/>.</summary>
@@ -334,23 +373,67 @@ namespace LibVLCSharp.Core
 
     // --- MediaList ---
 
-    /// <summary>Payload of <see cref="MediaList.ItemAdded"/> / <see cref="MediaList.ItemDeleted"/>.</summary>
+    /// <summary>
+    /// Payload of <see cref="MediaList.ItemAdded"/> / <see cref="MediaList.ItemDeleted"/>.
+    /// Wraps the borrowed <c>libvlc_media_t*</c> that is valid only for the duration of the event
+    /// handler — call <see cref="GetItem"/> inside the handler.
+    /// </summary>
     public readonly struct MediaListItemEventArgs
     {
-        /// <summary>The media added/removed (owning wrapper; dispose when done), or null.</summary>
-        public readonly Media? Item;
+        /// <summary>Borrowed native <c>libvlc_media_t*</c>; valid only for the duration of the event.</summary>
+        private readonly IntPtr item;
         /// <summary>Index of the item in the list.</summary>
         public readonly int Index;
-        public MediaListItemEventArgs(Media? item, int index) { Item = item; Index = index; }
+        public MediaListItemEventArgs(IntPtr item, int index) { this.item = item; Index = index; }
+
+        /// <summary>
+        /// Returns the media at <see cref="Index"/>.
+        /// <para>
+        /// When <paramref name="addRef"/> is <c>true</c> (default) the <see cref="Core.Media"/> is retained
+        /// (+1) and may be kept after the handler returns; the caller must dispose it. When
+        /// <c>false</c> the <see cref="Core.Media"/> is a non-owning view valid only inside the handler:
+        /// do not dispose it and do not keep a reference past the handler.
+        /// </para>
+        /// </summary>
+        public unsafe Media? GetItem(bool addRef = true)
+        {
+            var p = (libvlc_media_t*)item;
+            if (p == null) return null;
+            return addRef
+                ? new Media((IntPtr)libvlc_media_retain(p))
+                : new Media((IntPtr)p, addRef: false);
+        }
     }
 
     // --- RendererDiscoverer ---
 
-    /// <summary>Payload of <see cref="RendererDiscoverer.ItemAdded"/> / <see cref="RendererDiscoverer.ItemDeleted"/>.</summary>
+    /// <summary>
+    /// Payload of <see cref="RendererDiscoverer.ItemAdded"/> / <see cref="RendererDiscoverer.ItemDeleted"/>.
+    /// Wraps the borrowed <c>libvlc_renderer_item_t*</c> that is valid only for the duration of the event
+    /// handler — call <see cref="GetItem"/> inside the handler.
+    /// </summary>
     public readonly struct RendererItemEventArgs
     {
-        /// <summary>The renderer item (owning wrapper; dispose when done), or null.</summary>
-        public readonly RendererItem? Item;
-        public RendererItemEventArgs(RendererItem? item) => Item = item;
+        /// <summary>Borrowed native <c>libvlc_renderer_item_t*</c>; valid only for the duration of the event.</summary>
+        private readonly IntPtr item;
+        public RendererItemEventArgs(IntPtr item) => this.item = item;
+
+        /// <summary>
+        /// Returns the renderer item.
+        /// <para>
+        /// When <paramref name="addRef"/> is <c>true</c> (default) the <see cref="RendererItem"/> is held
+        /// (+1) and may be kept after the handler returns; the caller must dispose it. When
+        /// <c>false</c> the <see cref="RendererItem"/> is a non-owning view valid only inside the handler:
+        /// do not dispose it and do not keep a reference past the handler.
+        /// </para>
+        /// </summary>
+        public unsafe RendererItem? GetItem(bool addRef = true)
+        {
+            var p = (libvlc_renderer_item_t*)item;
+            if (p == null) return null;
+            return addRef
+                ? new RendererItem((IntPtr)libvlc_renderer_item_hold(p))
+                : new RendererItem((IntPtr)p, addRef: false);
+        }
     }
 }

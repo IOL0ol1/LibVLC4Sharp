@@ -134,7 +134,7 @@ namespace LibVLCSharp.Core
                 case libvlc_event_e.libvlc_MediaListPlayerPlayed: { var h = _played; if (h != null) h(this, EventArgs.Empty); break; }
                 case libvlc_event_e.libvlc_MediaListPlayerStopped: { var h = _stopped; if (h != null) h(this, EventArgs.Empty); break; }
                 case libvlc_event_e.libvlc_MediaListPlayerNextItemSet:
-                    { var h = _nextItemSet; if (h != null) h(this, new MediaEventArgs(NativeWrap.Media(e->u.media_list_player_next_item_set.item))); break; }
+                    { var h = _nextItemSet; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_list_player_next_item_set.item)); break; }
             }
         }
 
@@ -147,7 +147,7 @@ namespace LibVLCSharp.Core
         public event EventHandler Stopped { add => Events.Attach(ref _stopped, value, libvlc_event_e.libvlc_MediaListPlayerStopped); remove => Events.Detach(ref _stopped, value, libvlc_event_e.libvlc_MediaListPlayerStopped); }
         /// <summary>
         /// Raised when the next item in the media list has been set.
-        /// <c>libvlc_MediaListPlayerNextItemSet</c> — the next media (owning; dispose it).
+        /// <c>libvlc_MediaListPlayerNextItemSet</c>. Call <see cref="MediaEventArgs.GetMedia"/> (default retains).
         /// </summary>
         public event EventHandler<MediaEventArgs> NextItemSet { add => Events.Attach(ref _nextItemSet, value, libvlc_event_e.libvlc_MediaListPlayerNextItemSet); remove => Events.Detach(ref _nextItemSet, value, libvlc_event_e.libvlc_MediaListPlayerNextItemSet); }
     }

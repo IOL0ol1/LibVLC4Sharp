@@ -6,20 +6,20 @@ namespace LibVLCSharp.Core
     /// <summary>
     /// Base for the thin wrappers around reference-counted libvlc objects. Owns the native handle and
     /// releases it once (on <see cref="Dispose()"/> or finalization) via <see cref="Release"/>; pass
-    /// <c>owns: false</c> to wrap a borrowed handle that must not be released.
+    /// <c>addRef: false</c> to wrap a borrowed handle that must not be released.
     /// </summary>
     public abstract class NativeReference : IDisposable
     {
         private IntPtr _handle;
         private readonly bool _owns;
 
-        private protected NativeReference(IntPtr handle, bool owns = true)
+        private protected NativeReference(IntPtr handle, bool addRef = true)
         {
             if (handle == IntPtr.Zero)
                 throw new InvalidOperationException($"{GetType().Name}: libvlc returned a null handle.");
             _handle = handle;
-            _owns = owns;
-            if (!owns) GC.SuppressFinalize(this);
+            _owns = addRef;
+            if (!addRef) GC.SuppressFinalize(this);
         }
 
         /// <summary>The native <c>libvlc_*_t*</c>; <see cref="IntPtr.Zero"/> once disposed.</summary>

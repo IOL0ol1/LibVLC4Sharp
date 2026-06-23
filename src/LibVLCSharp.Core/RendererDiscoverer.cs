@@ -53,9 +53,9 @@ namespace LibVLCSharp.Core
             switch ((libvlc_event_e)e->type)
             {
                 case libvlc_event_e.libvlc_RendererDiscovererItemAdded:
-                    { var h = _itemAdded; if (h != null) h(this, new RendererItemEventArgs(NativeWrap.Renderer(e->u.renderer_discoverer_item_added.item))); break; }
+                    { var h = _itemAdded; if (h != null) h(this, new RendererItemEventArgs((IntPtr)e->u.renderer_discoverer_item_added.item)); break; }
                 case libvlc_event_e.libvlc_RendererDiscovererItemDeleted:
-                    { var h = _itemDeleted; if (h != null) h(this, new RendererItemEventArgs(NativeWrap.Renderer(e->u.renderer_discoverer_item_deleted.item))); break; }
+                    { var h = _itemDeleted; if (h != null) h(this, new RendererItemEventArgs((IntPtr)e->u.renderer_discoverer_item_deleted.item)); break; }
             }
         }
 
@@ -63,7 +63,7 @@ namespace LibVLCSharp.Core
 
         /// <summary>
         /// Raised when a new renderer item is discovered. <c>libvlc_RendererDiscovererItemAdded</c>.
-        /// The <see cref="RendererItem"/> in the event args is owned by the handler — dispose it when done.
+        /// Call <see cref="RendererItemEventArgs.GetItem"/> (default holds).
         /// </summary>
         public event EventHandler<RendererItemEventArgs> ItemAdded
         {
@@ -73,7 +73,7 @@ namespace LibVLCSharp.Core
 
         /// <summary>
         /// Raised when a previously discovered renderer item is removed. <c>libvlc_RendererDiscovererItemDeleted</c>.
-        /// The <see cref="RendererItem"/> in the event args is owned by the handler — dispose it when done.
+        /// Call <see cref="RendererItemEventArgs.GetItem"/> (default holds).
         /// </summary>
         public event EventHandler<RendererItemEventArgs> ItemDeleted
         {
@@ -93,6 +93,16 @@ namespace LibVLCSharp.Core
         /// <summary>Wraps an existing native handle (does not add a reference).</summary>
         /// <param name="handle">Native <c>libvlc_renderer_item_t*</c>.</param>
         public RendererItem(IntPtr handle) : base(handle) { }
+
+        /// <summary>
+        /// Wraps a native handle. When <paramref name="addRef"/> is <c>false</c> the item is a borrowed
+        /// view that is never released and is valid only for as long as its owner keeps it alive
+        /// (e.g. a renderer item obtained from <see cref="RendererItemEventArgs.GetItem"/> with
+        /// <c>addRef: false</c>, valid only inside the event handler). Do not dispose a borrowed item.
+        /// </summary>
+        /// <param name="handle">Native <c>libvlc_renderer_item_t*</c>.</param>
+        /// <param name="addRef"><c>true</c> to hold ownership and release on dispose; <c>false</c> for a borrowed view.</param>
+        public RendererItem(IntPtr handle, bool addRef) : base(handle, addRef) { }
 
         /// <summary>Implicit conversion to the native <c>libvlc_renderer_item_t*</c> (null for a null item).</summary>
         public static implicit operator libvlc_renderer_item_t*(RendererItem? rendererItem) =>

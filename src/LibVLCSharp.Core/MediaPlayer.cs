@@ -890,8 +890,8 @@ namespace LibVLCSharp.Core
                 case libvlc_event_e.libvlc_MediaPlayerTitleListChanged: { var h = _titleListChanged; if (h != null) h(this, EventArgs.Empty); break; }
 
                 // payload
-                case libvlc_event_e.libvlc_MediaPlayerMediaChanged: { var h = _mediaChanged; if (h != null) h(this, new MediaEventArgs(NativeWrap.Media(e->u.media_player_media_changed.new_media))); break; }
-                case libvlc_event_e.libvlc_MediaPlayerMediaStopping: { var h = _mediaStopping; if (h != null) h(this, new MediaEventArgs(NativeWrap.Media(e->u.media_player_media_stopping.media))); break; }
+                case libvlc_event_e.libvlc_MediaPlayerMediaChanged: { var h = _mediaChanged; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_player_media_changed.new_media)); break; }
+                case libvlc_event_e.libvlc_MediaPlayerMediaStopping: { var h = _mediaStopping; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_player_media_stopping.media)); break; }
                 case libvlc_event_e.libvlc_MediaPlayerBuffering: { var h = _buffering; if (h != null) h(this, new BufferingEventArgs(e->u.media_player_buffering.new_cache)); break; }
                 case libvlc_event_e.libvlc_MediaPlayerTimeChanged: { var h = _timeChanged; if (h != null) h(this, new TimeChangedEventArgs(e->u.media_player_time_changed.new_time)); break; }
                 case libvlc_event_e.libvlc_MediaPlayerPositionChanged: { var h = _positionChanged; if (h != null) h(this, new PositionChangedEventArgs(e->u.media_player_position_changed.new_position)); break; }
@@ -980,9 +980,9 @@ namespace LibVLCSharp.Core
         /// <summary><c>libvlc_MediaPlayerTitleListChanged</c>.</summary>
         public event EventHandler TitleListChanged { add => Events.Attach(ref _titleListChanged, value, libvlc_event_e.libvlc_MediaPlayerTitleListChanged); remove => Events.Detach(ref _titleListChanged, value, libvlc_event_e.libvlc_MediaPlayerTitleListChanged); }
 
-        /// <summary><c>libvlc_MediaPlayerMediaChanged</c> (owning <see cref="Core.Media"/>; dispose it).</summary>
+        /// <summary><c>libvlc_MediaPlayerMediaChanged</c>. Call <see cref="MediaEventArgs.GetMedia"/> (default retains).</summary>
         public event EventHandler<MediaEventArgs> MediaChanged { add => Events.Attach(ref _mediaChanged, value, libvlc_event_e.libvlc_MediaPlayerMediaChanged); remove => Events.Detach(ref _mediaChanged, value, libvlc_event_e.libvlc_MediaPlayerMediaChanged); }
-        /// <summary><c>libvlc_MediaPlayerMediaStopping</c> (owning <see cref="Core.Media"/>; dispose it).</summary>
+        /// <summary><c>libvlc_MediaPlayerMediaStopping</c>. Call <see cref="MediaEventArgs.GetMedia"/> (default retains).</summary>
         public event EventHandler<MediaEventArgs> MediaStopping { add => Events.Attach(ref _mediaStopping, value, libvlc_event_e.libvlc_MediaPlayerMediaStopping); remove => Events.Detach(ref _mediaStopping, value, libvlc_event_e.libvlc_MediaPlayerMediaStopping); }
         /// <summary><c>libvlc_MediaPlayerBuffering</c>.</summary>
         public event EventHandler<BufferingEventArgs> Buffering { add => Events.Attach(ref _buffering, value, libvlc_event_e.libvlc_MediaPlayerBuffering); remove => Events.Detach(ref _buffering, value, libvlc_event_e.libvlc_MediaPlayerBuffering); }
