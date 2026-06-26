@@ -306,8 +306,8 @@ namespace LibVLCSharp.WPF
                 IntPtr ctx;
                 lock (_gpuLock) { ctx = _d3d11Context; }
                 if (ctx == IntPtr.Zero) return false;
-                @out->d3d11.device_context = ctx;       // hand libvlc our immediate context (it renders on it)
-                @out->d3d11.context_mutex = IntPtr.Zero; // we rely on ID3D11Multithread instead of a caller mutex
+                @out->u.d3d11.device_context = ctx;       // hand libvlc our immediate context (it renders on it)
+                @out->u.d3d11.context_mutex = IntPtr.Zero; // we rely on ID3D11Multithread instead of a caller mutex
                 Direct3D11.AddRef(ctx);                 // libvlc releases this ref on output teardown
                 return true;
             }
@@ -384,7 +384,7 @@ namespace LibVLCSharp.WPF
                     }
                     else
                     {
-                        output->dxgi_format = Direct3D11.DXGI_FORMAT_B8G8R8A8_UNORM;
+                        output->u.dxgi_format = Direct3D11.DXGI_FORMAT_B8G8R8A8_UNORM;
                         output->full_range = 1;
                         output->colorspace = libvlc_video_color_space_t.libvlc_video_colorspace_BT709;
                         output->primaries = libvlc_video_color_primaries_t.libvlc_video_primaries_BT709;

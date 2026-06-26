@@ -7,28 +7,28 @@ using static LibVLCSharp.Core.Interop.libvlc;
 namespace LibVLCSharp.Core
 {
     /// <summary>A media player (<c>libvlc_media_player_t</c>): plays a <see cref="Media"/>.</summary>
+    /// <remarks>
+    /// Events (libvlc 4.0 <c>libvlc_media_player_cbs</c>) are wired only for players created through a
+    /// constructor / <see cref="LibVLC.CreateMediaPlayer()"/>; see the <c>MediaPlayer.Events.cs</c> partial.
+    /// </remarks>
     public unsafe class MediaPlayer : NativeReference
     {
-        private EventManager? _events;
-
-        /// <summary>Wraps an existing native handle.</summary>
+        /// <summary>
+        /// Wraps an existing native handle the library already owns (e.g. the player returned by
+        /// <c>MediaListPlayer.MediaPlayer</c>). <c>internal</c> because libvlc 4.0 only accepts
+        /// <c>libvlc_media_player_cbs</c> at creation: a wrapped instance has no callbacks registered, so
+        /// its events never fire. Public players (a constructor / <see cref="LibVLC.CreateMediaPlayer()"/>)
+        /// always have events wired.
+        /// </summary>
         /// <param name="handle">Native <c>libvlc_media_player_t*</c>.</param>
-        public MediaPlayer(IntPtr handle) : base(handle) { }
+        internal MediaPlayer(IntPtr handle) : base(handle) { }
 
         /// <summary>Implicit conversion to the native <c>libvlc_media_player_t*</c> (null for a null player).</summary>
         public static implicit operator libvlc_media_player_t*(MediaPlayer? mediaPlayer) =>
             mediaPlayer is null ? null : (libvlc_media_player_t*)mediaPlayer.NativeHandle;
 
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                _timeWatch?.Dispose();   // unwatch_time before release (needs the player alive)
-                _events?.Dispose();
-            }
-            base.Dispose(disposing);
-        }
-
+        // Dispose (in the MediaPlayer.Events.cs partial) unwatches any active time watch and frees the
+        // event-callback GCHandle around this release.
         protected override void Release(IntPtr handle) =>
             libvlc_media_player_release((libvlc_media_player_t*)handle);
 
@@ -49,6 +49,93 @@ namespace LibVLCSharp.Core
             {
                 _media = value;
                 libvlc_media_player_set_media(this, value);
+            }
+        }
+
+        private Media? _nextMedia;
+
+        /// <summary>
+        /// The media to play next once the current one ends (gapless). Since libvlc 4.0.
+        /// Setter: <c>libvlc_media_player_set_next_media</c>. Getter: <c>libvlc_media_player_get_next_media</c>
+        /// — returns the assigned instance (the extra reference the getter takes is released); a new owning
+        /// wrapper if changed externally.
+        /// </summary>
+        public Media? NextMedia
+        {
+            get => Reconcile(ref _nextMedia, (IntPtr)libvlc_media_player_get_next_media(this), // +1 ref, or null
+                static h => libvlc_media_release((libvlc_media_t*)h),
+                static h => new Media(h));
+            set
+            {
+                _nextMedia = value;
+                libvlc_media_player_set_next_media(this, value);
+            }
+        }
+
+        // --- time watch (high-precision playback time; libvlc_media_player_watch_time_cbs) ---
+
+        private TimeWatch? _timeWatch;
+
+        /// <summary>
+        /// Subscribes to high-precision playback-time updates. <c>libvlc_media_player_watch_time</c>.
+        /// Dispose the returned handle (or the player) to unsubscribe. Only one watch is active at a time.
+        /// Callbacks fire on libvlc's own threads.
+        /// </summary>
+        /// <param name="minPeriodUs">Minimum interval between <paramref name="onUpdate"/> calls, in microseconds.</param>
+        /// <param name="onUpdate">Periodic time update (required).</param>
+        /// <param name="onPaused">Invoked on pause with the system date (microseconds), or null.</param>
+        /// <param name="onSeek">Invoked on seek with the new time point, or null.</param>
+        /// <returns>A handle; dispose it to stop watching.</returns>
+        public IDisposable WatchTime(long minPeriodUs, Action<MediaPlayer, MediaTimePoint> onUpdate,
+            Action<MediaPlayer, long>? onPaused = null, Action<MediaPlayer, MediaTimePoint>? onSeek = null)
+        {
+            if (onUpdate is null) throw new ArgumentNullException(nameof(onUpdate));
+            return _timeWatch = new TimeWatch(this, minPeriodUs, onUpdate, onPaused, onSeek);
+        }
+
+        private sealed unsafe class TimeWatch : IDisposable
+        {
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void OnPoint(IntPtr opaque, libvlc_media_player_time_point_t* value);
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void OnPaused(IntPtr opaque, long systemDateUs);
+
+            private readonly MediaPlayer _mp;
+            private readonly Action<MediaPlayer, MediaTimePoint> _onUpdate;
+            private readonly Action<MediaPlayer, long>? _onPaused;
+            private readonly Action<MediaPlayer, MediaTimePoint>? _onSeek;
+            private readonly OnPoint _u;   // rooted for the watch's lifetime (libvlc holds the function pointers)
+            private readonly OnPaused? _p;
+            private readonly OnPoint? _s;
+            private bool _disposed;
+
+            public TimeWatch(MediaPlayer mp, long minPeriodUs, Action<MediaPlayer, MediaTimePoint> onUpdate,
+                Action<MediaPlayer, long>? onPaused, Action<MediaPlayer, MediaTimePoint>? onSeek)
+            {
+                _mp = mp; _onUpdate = onUpdate; _onPaused = onPaused; _onSeek = onSeek;
+                _u = Update;
+                _p = onPaused is null ? null : Paused;
+                _s = onSeek is null ? null : Seek;
+                var cbs = new libvlc_media_player_watch_time_cbs
+                {
+                    version = 0,
+                    on_update = Marshal.GetFunctionPointerForDelegate(_u),
+                    on_paused = _p is null ? IntPtr.Zero : Marshal.GetFunctionPointerForDelegate(_p),
+                    on_seek = _s is null ? IntPtr.Zero : Marshal.GetFunctionPointerForDelegate(_s),
+                };
+                if (libvlc_media_player_watch_time(mp, minPeriodUs, &cbs, IntPtr.Zero) != 0)
+                    throw new InvalidOperationException("libvlc_media_player_watch_time failed (already watching?).");
+            }
+
+            private void Update(IntPtr _, libvlc_media_player_time_point_t* value) => _onUpdate(_mp, new MediaTimePoint(value));
+            private void Paused(IntPtr _, long systemDateUs) => _onPaused?.Invoke(_mp, systemDateUs);
+            private void Seek(IntPtr _, libvlc_media_player_time_point_t* value) => _onSeek?.Invoke(_mp, new MediaTimePoint(value));
+
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+                libvlc_media_player_unwatch_time(_mp);   // guarantees no callback is in flight on return
+                if (ReferenceEquals(_mp._timeWatch, this)) _mp._timeWatch = null;
+                GC.KeepAlive(_u); GC.KeepAlive(_p); GC.KeepAlive(_s);
             }
         }
 
@@ -196,7 +283,7 @@ namespace LibVLCSharp.Core
         public int Title
         {
             get => libvlc_media_player_get_title(this);
-            set => libvlc_media_player_set_title(this, value);
+            set => libvlc_media_player_set_title(this, (uint)value); // libvlc 4.0 nightly 202606260430 changed the parameter to unsigned
         }
 
         /// <summary>Number of titles. <c>libvlc_media_player_get_title_count</c>.</summary>
@@ -802,233 +889,219 @@ namespace LibVLCSharp.Core
                 _outUpdate.ToFunctionPointer(), _outSwap.ToFunctionPointer(), _outMakeCurrent.ToFunctionPointer(),
                 _outGetProc.ToFunctionPointer(), _outMetadata.ToFunctionPointer(), _outSelectPlane.ToFunctionPointer(), opaque).ToBool();
         }
+        // GCHandle handed to libvlc as the cbs opaque; its target is wired to `this` after construction.
+        // default (not allocated) for instances that merely wrap an existing handle — they have no
+        // callbacks (libvlc 4.0 cannot register them after creation) so subscribing throws.
+        private GCHandle _cbsHandle;
 
-        // --- time watch ---
+        /// <summary>Creates a media player bound to <paramref name="vlc"/>, with events wired. <c>libvlc_media_player_new</c>.</summary>
+        public MediaPlayer(LibVLC vlc) : this(vlc, (MediaPlayerCallbacks?)null) { }
 
-        private TimeWatch? _timeWatch;
+        /// <summary>Creates a media player, pre-subscribing the handlers in <paramref name="callbacks"/> (a batch over <c>+=</c>). <c>libvlc_media_player_new</c>.</summary>
+        public MediaPlayer(LibVLC vlc, MediaPlayerCallbacks? callbacks) : this(Create(vlc, null)) => Subscribe(callbacks);
 
-        /// <summary>
-        /// Subscribes to high-precision playback-time updates. <c>libvlc_media_player_watch_time</c>.
-        /// Release the returned handle (or the player) to unsubscribe. Only one watch is active at a
-        /// time. Callbacks fire on libvlc threads.
-        /// </summary>
-        /// <param name="minPeriodUs">Minimum interval between <paramref name="onUpdate"/> calls, in microseconds.</param>
-        /// <param name="onUpdate">Periodic time update (required).</param>
-        /// <param name="onPaused">Invoked on pause with the system date (microseconds), or null.</param>
-        /// <param name="onSeek">Invoked on seek with the new time point, or null.</param>
-        public IDisposable WatchTime(long minPeriodUs, Action<MediaPlayer, MediaTimePoint> onUpdate,
-            Action<MediaPlayer, long>? onPaused = null, Action<MediaPlayer, MediaTimePoint>? onSeek = null)
+        /// <summary>Creates a media player from <paramref name="media"/>, with events wired. <c>libvlc_media_player_new_from_media</c>.</summary>
+        public MediaPlayer(LibVLC vlc, Media media, MediaPlayerCallbacks? callbacks = null) : this(Create(vlc, media)) => Subscribe(callbacks);
+
+        private MediaPlayer(Creation c) : base(c.Handle)
         {
-            if (onUpdate is null) throw new ArgumentNullException(nameof(onUpdate));
-            return _timeWatch = new TimeWatch(this, minPeriodUs, onUpdate, onPaused, onSeek);
+            _cbsHandle = c.Opaque;
+            _cbsHandle.Target = this; // route the opaque to this instance now that it exists
         }
 
-        private unsafe class TimeWatch : IDisposable
+        private readonly struct Creation
         {
-            private readonly MediaPlayer _mp;
-            private readonly Action<MediaPlayer, MediaTimePoint> _onUpdate;
-            private readonly Action<MediaPlayer, long>? _onPaused;
-            private readonly Action<MediaPlayer, MediaTimePoint>? _onSeek;
-            private readonly libvlc_media_player_watch_time_on_update _u;
-            private readonly libvlc_media_player_watch_time_on_paused? _p;
-            private readonly libvlc_media_player_watch_time_on_seek? _s;
-            private bool _disposed;
-
-            public TimeWatch(MediaPlayer mp, long minPeriodUs, Action<MediaPlayer, MediaTimePoint> onUpdate,
-                Action<MediaPlayer, long>? onPaused, Action<MediaPlayer, MediaTimePoint>? onSeek)
-            {
-                _mp = mp; _onUpdate = onUpdate; _onPaused = onPaused; _onSeek = onSeek;
-                _u = OnUpdate;
-                _p = onPaused is null ? null : OnPaused;
-                _s = onSeek is null ? null : OnSeek;
-
-                int rc = libvlc_media_player_watch_time(mp, minPeriodUs,
-                    Marshal.GetFunctionPointerForDelegate(_u),
-                    _p is null ? IntPtr.Zero : Marshal.GetFunctionPointerForDelegate(_p),
-                    _s is null ? IntPtr.Zero : Marshal.GetFunctionPointerForDelegate(_s),
-                    IntPtr.Zero);
-                if (rc != 0)
-                    throw new InvalidOperationException("libvlc_media_player_watch_time failed (already watching?).");
-            }
-
-            private void OnUpdate(libvlc_media_player_time_point_t* value, IntPtr data) => _onUpdate(_mp, new MediaTimePoint(value));
-            private void OnPaused(long systemDateUs, IntPtr data) => _onPaused?.Invoke(_mp, systemDateUs);
-            private void OnSeek(libvlc_media_player_time_point_t* value, IntPtr data) => _onSeek?.Invoke(_mp, new MediaTimePoint(value));
-
-            public void Dispose()
-            {
-                if (_disposed) return;
-                _disposed = true;
-                libvlc_media_player_unwatch_time(_mp);   // guarantees no callback is in flight on return
-                if (ReferenceEquals(_mp._timeWatch, this)) _mp._timeWatch = null;
-            }
+            public readonly IntPtr Handle;
+            public readonly GCHandle Opaque;
+            public Creation(IntPtr handle, GCHandle opaque) { Handle = handle; Opaque = opaque; }
         }
 
-        // --- events ---
-
-        private EventManager Events =>
-            _events ??= new EventManager(libvlc_media_player_event_manager(this), Dispatch);
-
-        private void Dispatch(libvlc_event_t* e, IntPtr _)
+        private static Creation Create(LibVLC vlc, Media? media)
         {
-            switch ((libvlc_event_e)e->type)
-            {
-                // no payload
-                case libvlc_event_e.libvlc_MediaPlayerNothingSpecial: { var h = _nothingSpecial; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerOpening: { var h = _opening; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerPlaying: { var h = _playing; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerPaused: { var h = _paused; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerStopped: { var h = _stopped; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerForward: { var h = _forward; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerBackward: { var h = _backward; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerStopping: { var h = _stopping; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerEncounteredError: { var h = _error; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerCorked: { var h = _corked; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerUncorked: { var h = _uncorked; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerMuted: { var h = _muted; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerUnmuted: { var h = _unmuted; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaPlayerTitleListChanged: { var h = _titleListChanged; if (h != null) h(this, EventArgs.Empty); break; }
-
-                // payload
-                case libvlc_event_e.libvlc_MediaPlayerMediaChanged: { var h = _mediaChanged; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_player_media_changed.new_media)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerMediaStopping: { var h = _mediaStopping; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_player_media_stopping.media)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerBuffering: { var h = _buffering; if (h != null) h(this, new BufferingEventArgs(e->u.media_player_buffering.new_cache)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerTimeChanged: { var h = _timeChanged; if (h != null) h(this, new TimeChangedEventArgs(e->u.media_player_time_changed.new_time)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerPositionChanged: { var h = _positionChanged; if (h != null) h(this, new PositionChangedEventArgs(e->u.media_player_position_changed.new_position)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerSeekableChanged: { var h = _seekableChanged; if (h != null) h(this, new SeekableChangedEventArgs(e->u.media_player_seekable_changed.new_seekable != 0)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerPausableChanged: { var h = _pausableChanged; if (h != null) h(this, new PausableChangedEventArgs(e->u.media_player_pausable_changed.new_pausable != 0)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerSnapshotTaken: { var h = _snapshotTaken; if (h != null) h(this, new SnapshotTakenEventArgs(((IntPtr)e->u.media_player_snapshot_taken.psz_filename).GetUtf8())); break; }
-                case libvlc_event_e.libvlc_MediaPlayerLengthChanged: { var h = _lengthChanged; if (h != null) h(this, new LengthChangedEventArgs(e->u.media_player_length_changed.new_length)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerVout: { var h = _vout; if (h != null) h(this, new VoutEventArgs(e->u.media_player_vout.new_count)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerESAdded: { var h = _esAdded; if (h != null) h(this, EsChanged(e)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerESDeleted: { var h = _esDeleted; if (h != null) h(this, EsChanged(e)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerESUpdated: { var h = _esUpdated; if (h != null) h(this, EsChanged(e)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerESSelected:
-                    {
-                        var h = _esSelected;
-                        if (h != null)
-                            h(this, new EsSelectionChangedEventArgs(
-                                (TrackType)e->u.media_player_es_selection_changed.i_type,
-                                ((IntPtr)e->u.media_player_es_selection_changed.psz_unselected_id).GetUtf8(),
-                                ((IntPtr)e->u.media_player_es_selection_changed.psz_selected_id).GetUtf8()));
-                        break;
-                    }
-                case libvlc_event_e.libvlc_MediaPlayerAudioVolume: { var h = _audioVolume; if (h != null) h(this, new AudioVolumeEventArgs(e->u.media_player_audio_volume.volume)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerAudioDevice: { var h = _audioDevice; if (h != null) h(this, new AudioDeviceEventArgs(((IntPtr)e->u.media_player_audio_device.device).GetUtf8())); break; }
-                case libvlc_event_e.libvlc_MediaPlayerProgramAdded: { var h = _programAdded; if (h != null) h(this, new ProgramEventArgs(e->u.media_player_program_changed.i_id)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerProgramDeleted: { var h = _programDeleted; if (h != null) h(this, new ProgramEventArgs(e->u.media_player_program_changed.i_id)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerProgramUpdated: { var h = _programUpdated; if (h != null) h(this, new ProgramEventArgs(e->u.media_player_program_changed.i_id)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerProgramSelected: { var h = _programSelected; if (h != null) h(this, new ProgramSelectionChangedEventArgs(e->u.media_player_program_selection_changed.i_unselected_id, e->u.media_player_program_selection_changed.i_selected_id)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerTitleSelectionChanged: { var h = _titleSelectionChanged; if (h != null) h(this, new TitleSelectionChangedEventArgs((IntPtr)e->u.media_player_title_selection_changed.title, e->u.media_player_title_selection_changed.index)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerChapterChanged: { var h = _chapterChanged; if (h != null) h(this, new ChapterChangedEventArgs(e->u.media_player_chapter_changed.new_chapter)); break; }
-                case libvlc_event_e.libvlc_MediaPlayerRecordChanged: { var h = _recordChanged; if (h != null) h(this, new RecordChangedEventArgs(e->u.media_player_record_changed.recording.ToBool(), ((IntPtr)e->u.media_player_record_changed.recorded_file_path).GetUtf8())); break; }
-            }
+            if (vlc is null) throw new ArgumentNullException(nameof(vlc));
+            var gch = GCHandle.Alloc(null); // target set in the ctor once the player exists
+            var cbs = s_cbs;                 // local copy; libvlc reads it during the call
+            IntPtr opaque = GCHandle.ToIntPtr(gch);
+            IntPtr handle = (IntPtr)(media is null
+                ? libvlc_media_player_new(vlc, &cbs, opaque)
+                : libvlc_media_player_new_from_media(vlc, media, &cbs, opaque));
+            if (handle == IntPtr.Zero) gch.Free(); // base ctor will throw on the null handle
+            return new Creation(handle, gch);
         }
 
-        private static EsChangedEventArgs EsChanged(libvlc_event_t* e) => new EsChangedEventArgs(
-            (TrackType)e->u.media_player_es_changed.i_type,
-            e->u.media_player_es_changed.i_id,
-            ((IntPtr)e->u.media_player_es_changed.psz_id).GetUtf8());
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _timeWatch?.Dispose();          // unwatch_time before release (needs the player alive)
+            base.Dispose(disposing);                       // release the player; after this libvlc won't call back
+            if (_cbsHandle.IsAllocated) _cbsHandle.Free(); // then free the opaque GCHandle
+        }
 
-        private EventHandler? _nothingSpecial, _opening, _playing, _paused, _stopped, _forward, _backward,
-            _stopping, _error, _corked, _uncorked, _muted, _unmuted, _titleListChanged;
-        private EventHandler<MediaEventArgs>? _mediaChanged, _mediaStopping;
-        private EventHandler<BufferingEventArgs>? _buffering;
-        private EventHandler<TimeChangedEventArgs>? _timeChanged;
-        private EventHandler<PositionChangedEventArgs>? _positionChanged;
-        private EventHandler<SeekableChangedEventArgs>? _seekableChanged;
-        private EventHandler<PausableChangedEventArgs>? _pausableChanged;
-        private EventHandler<SnapshotTakenEventArgs>? _snapshotTaken;
-        private EventHandler<LengthChangedEventArgs>? _lengthChanged;
-        private EventHandler<VoutEventArgs>? _vout;
-        private EventHandler<EsChangedEventArgs>? _esAdded, _esDeleted, _esUpdated;
-        private EventHandler<EsSelectionChangedEventArgs>? _esSelected;
-        private EventHandler<AudioVolumeEventArgs>? _audioVolume;
-        private EventHandler<AudioDeviceEventArgs>? _audioDevice;
-        private EventHandler<ProgramEventArgs>? _programAdded, _programDeleted, _programUpdated;
-        private EventHandler<ProgramSelectionChangedEventArgs>? _programSelected;
-        private EventHandler<TitleSelectionChangedEventArgs>? _titleSelectionChanged;
-        private EventHandler<ChapterChangedEventArgs>? _chapterChanged;
-        private EventHandler<RecordChangedEventArgs>? _recordChanged;
+        private void Subscribe(MediaPlayerCallbacks? c)
+        {
+            if (c is null) return;
+            MediaChanged += c.MediaChanged; MediaStopping += c.MediaStopping; StateChanged += c.StateChanged;
+            BufferingChanged += c.BufferingChanged; CapabilitiesChanged += c.CapabilitiesChanged;
+            PositionChanged += c.PositionChanged; LengthChanged += c.LengthChanged;
+            TrackListChanged += c.TrackListChanged; TrackSelectionChanged += c.TrackSelectionChanged;
+            ProgramListChanged += c.ProgramListChanged; ProgramSelectionChanged += c.ProgramSelectionChanged;
+            TitlesChanged += c.TitlesChanged; TitleSelectionChanged += c.TitleSelectionChanged;
+            ChapterSelectionChanged += c.ChapterSelectionChanged; RecordingChanged += c.RecordingChanged;
+            ScreenshotTaken += c.ScreenshotTaken; MediaParsed += c.MediaParsed; MediaMetaChanged += c.MediaMetaChanged;
+            MediaSubitemsChanged += c.MediaSubitemsChanged; MediaAttachmentsAdded += c.MediaAttachmentsAdded;
+            VoutChanged += c.VoutChanged; CorkChanged += c.CorkChanged; AudioVolumeChanged += c.AudioVolumeChanged;
+            AudioMuteChanged += c.AudioMuteChanged; AudioDeviceChanged += c.AudioDeviceChanged;
+        }
 
-        /// <summary><c>libvlc_MediaPlayerNothingSpecial</c>.</summary>
-        public event EventHandler NothingSpecial { add => Events.Attach(ref _nothingSpecial, value, libvlc_event_e.libvlc_MediaPlayerNothingSpecial); remove => Events.Detach(ref _nothingSpecial, value, libvlc_event_e.libvlc_MediaPlayerNothingSpecial); }
-        /// <summary><c>libvlc_MediaPlayerOpening</c>.</summary>
-        public event EventHandler Opening { add => Events.Attach(ref _opening, value, libvlc_event_e.libvlc_MediaPlayerOpening); remove => Events.Detach(ref _opening, value, libvlc_event_e.libvlc_MediaPlayerOpening); }
-        /// <summary><c>libvlc_MediaPlayerPlaying</c>.</summary>
-        public event EventHandler Playing { add => Events.Attach(ref _playing, value, libvlc_event_e.libvlc_MediaPlayerPlaying); remove => Events.Detach(ref _playing, value, libvlc_event_e.libvlc_MediaPlayerPlaying); }
-        /// <summary><c>libvlc_MediaPlayerPaused</c>.</summary>
-        public event EventHandler Paused { add => Events.Attach(ref _paused, value, libvlc_event_e.libvlc_MediaPlayerPaused); remove => Events.Detach(ref _paused, value, libvlc_event_e.libvlc_MediaPlayerPaused); }
-        /// <summary><c>libvlc_MediaPlayerStopped</c>.</summary>
-        public event EventHandler Stopped { add => Events.Attach(ref _stopped, value, libvlc_event_e.libvlc_MediaPlayerStopped); remove => Events.Detach(ref _stopped, value, libvlc_event_e.libvlc_MediaPlayerStopped); }
-        /// <summary><c>libvlc_MediaPlayerForward</c>.</summary>
-        public event EventHandler Forward { add => Events.Attach(ref _forward, value, libvlc_event_e.libvlc_MediaPlayerForward); remove => Events.Detach(ref _forward, value, libvlc_event_e.libvlc_MediaPlayerForward); }
-        /// <summary><c>libvlc_MediaPlayerBackward</c>.</summary>
-        public event EventHandler Backward { add => Events.Attach(ref _backward, value, libvlc_event_e.libvlc_MediaPlayerBackward); remove => Events.Detach(ref _backward, value, libvlc_event_e.libvlc_MediaPlayerBackward); }
-        /// <summary><c>libvlc_MediaPlayerStopping</c> (the 4.x replacement for EndReached).</summary>
-        public event EventHandler Stopping { add => Events.Attach(ref _stopping, value, libvlc_event_e.libvlc_MediaPlayerStopping); remove => Events.Detach(ref _stopping, value, libvlc_event_e.libvlc_MediaPlayerStopping); }
-        /// <summary><c>libvlc_MediaPlayerEncounteredError</c>.</summary>
-        public event EventHandler EncounteredError { add => Events.Attach(ref _error, value, libvlc_event_e.libvlc_MediaPlayerEncounteredError); remove => Events.Detach(ref _error, value, libvlc_event_e.libvlc_MediaPlayerEncounteredError); }
-        /// <summary><c>libvlc_MediaPlayerCorked</c>.</summary>
-        public event EventHandler Corked { add => Events.Attach(ref _corked, value, libvlc_event_e.libvlc_MediaPlayerCorked); remove => Events.Detach(ref _corked, value, libvlc_event_e.libvlc_MediaPlayerCorked); }
-        /// <summary><c>libvlc_MediaPlayerUncorked</c>.</summary>
-        public event EventHandler Uncorked { add => Events.Attach(ref _uncorked, value, libvlc_event_e.libvlc_MediaPlayerUncorked); remove => Events.Detach(ref _uncorked, value, libvlc_event_e.libvlc_MediaPlayerUncorked); }
-        /// <summary><c>libvlc_MediaPlayerMuted</c>.</summary>
-        public event EventHandler Muted { add => Events.Attach(ref _muted, value, libvlc_event_e.libvlc_MediaPlayerMuted); remove => Events.Detach(ref _muted, value, libvlc_event_e.libvlc_MediaPlayerMuted); }
-        /// <summary><c>libvlc_MediaPlayerUnmuted</c>.</summary>
-        public event EventHandler Unmuted { add => Events.Attach(ref _unmuted, value, libvlc_event_e.libvlc_MediaPlayerUnmuted); remove => Events.Detach(ref _unmuted, value, libvlc_event_e.libvlc_MediaPlayerUnmuted); }
-        /// <summary><c>libvlc_MediaPlayerTitleListChanged</c>.</summary>
-        public event EventHandler TitleListChanged { add => Events.Attach(ref _titleListChanged, value, libvlc_event_e.libvlc_MediaPlayerTitleListChanged); remove => Events.Detach(ref _titleListChanged, value, libvlc_event_e.libvlc_MediaPlayerTitleListChanged); }
+        // --- events (field-like; raised directly from the static dispatch methods; payload structs => no boxing) ---
+        // Every publicly-creatable MediaPlayer (constructor / LibVLC.CreateMediaPlayer()) has callbacks wired,
+        // so these always fire. The only instances without callbacks come from the internal MediaPlayer(IntPtr)
+        // wrapper (libvlc 4.0 cannot register callbacks on an existing handle); their events stay silent until
+        // the MediaListPlayer phase wires them via libvlc_media_list_player_new(cbs).
 
-        /// <summary><c>libvlc_MediaPlayerMediaChanged</c>. Call <see cref="MediaEventArgs.GetMedia"/> (default retains).</summary>
-        public event EventHandler<MediaEventArgs> MediaChanged { add => Events.Attach(ref _mediaChanged, value, libvlc_event_e.libvlc_MediaPlayerMediaChanged); remove => Events.Detach(ref _mediaChanged, value, libvlc_event_e.libvlc_MediaPlayerMediaChanged); }
-        /// <summary><c>libvlc_MediaPlayerMediaStopping</c>. Call <see cref="MediaEventArgs.GetMedia"/> (default retains).</summary>
-        public event EventHandler<MediaEventArgs> MediaStopping { add => Events.Attach(ref _mediaStopping, value, libvlc_event_e.libvlc_MediaPlayerMediaStopping); remove => Events.Detach(ref _mediaStopping, value, libvlc_event_e.libvlc_MediaPlayerMediaStopping); }
-        /// <summary><c>libvlc_MediaPlayerBuffering</c>.</summary>
-        public event EventHandler<BufferingEventArgs> Buffering { add => Events.Attach(ref _buffering, value, libvlc_event_e.libvlc_MediaPlayerBuffering); remove => Events.Detach(ref _buffering, value, libvlc_event_e.libvlc_MediaPlayerBuffering); }
-        /// <summary><c>libvlc_MediaPlayerTimeChanged</c>.</summary>
-        public event EventHandler<TimeChangedEventArgs> TimeChanged { add => Events.Attach(ref _timeChanged, value, libvlc_event_e.libvlc_MediaPlayerTimeChanged); remove => Events.Detach(ref _timeChanged, value, libvlc_event_e.libvlc_MediaPlayerTimeChanged); }
-        /// <summary><c>libvlc_MediaPlayerPositionChanged</c>.</summary>
-        public event EventHandler<PositionChangedEventArgs> PositionChanged { add => Events.Attach(ref _positionChanged, value, libvlc_event_e.libvlc_MediaPlayerPositionChanged); remove => Events.Detach(ref _positionChanged, value, libvlc_event_e.libvlc_MediaPlayerPositionChanged); }
-        /// <summary><c>libvlc_MediaPlayerSeekableChanged</c>.</summary>
-        public event EventHandler<SeekableChangedEventArgs> SeekableChanged { add => Events.Attach(ref _seekableChanged, value, libvlc_event_e.libvlc_MediaPlayerSeekableChanged); remove => Events.Detach(ref _seekableChanged, value, libvlc_event_e.libvlc_MediaPlayerSeekableChanged); }
-        /// <summary><c>libvlc_MediaPlayerPausableChanged</c>.</summary>
-        public event EventHandler<PausableChangedEventArgs> PausableChanged { add => Events.Attach(ref _pausableChanged, value, libvlc_event_e.libvlc_MediaPlayerPausableChanged); remove => Events.Detach(ref _pausableChanged, value, libvlc_event_e.libvlc_MediaPlayerPausableChanged); }
-        /// <summary><c>libvlc_MediaPlayerSnapshotTaken</c>.</summary>
-        public event EventHandler<SnapshotTakenEventArgs> SnapshotTaken { add => Events.Attach(ref _snapshotTaken, value, libvlc_event_e.libvlc_MediaPlayerSnapshotTaken); remove => Events.Detach(ref _snapshotTaken, value, libvlc_event_e.libvlc_MediaPlayerSnapshotTaken); }
-        /// <summary><c>libvlc_MediaPlayerLengthChanged</c>.</summary>
-        public event EventHandler<LengthChangedEventArgs> LengthChanged { add => Events.Attach(ref _lengthChanged, value, libvlc_event_e.libvlc_MediaPlayerLengthChanged); remove => Events.Detach(ref _lengthChanged, value, libvlc_event_e.libvlc_MediaPlayerLengthChanged); }
-        /// <summary><c>libvlc_MediaPlayerVout</c>.</summary>
-        public event EventHandler<VoutEventArgs> Vout { add => Events.Attach(ref _vout, value, libvlc_event_e.libvlc_MediaPlayerVout); remove => Events.Detach(ref _vout, value, libvlc_event_e.libvlc_MediaPlayerVout); }
-        /// <summary><c>libvlc_MediaPlayerESAdded</c>.</summary>
-        public event EventHandler<EsChangedEventArgs> ESAdded { add => Events.Attach(ref _esAdded, value, libvlc_event_e.libvlc_MediaPlayerESAdded); remove => Events.Detach(ref _esAdded, value, libvlc_event_e.libvlc_MediaPlayerESAdded); }
-        /// <summary><c>libvlc_MediaPlayerESDeleted</c>.</summary>
-        public event EventHandler<EsChangedEventArgs> ESDeleted { add => Events.Attach(ref _esDeleted, value, libvlc_event_e.libvlc_MediaPlayerESDeleted); remove => Events.Detach(ref _esDeleted, value, libvlc_event_e.libvlc_MediaPlayerESDeleted); }
-        /// <summary><c>libvlc_MediaPlayerESUpdated</c>.</summary>
-        public event EventHandler<EsChangedEventArgs> ESUpdated { add => Events.Attach(ref _esUpdated, value, libvlc_event_e.libvlc_MediaPlayerESUpdated); remove => Events.Detach(ref _esUpdated, value, libvlc_event_e.libvlc_MediaPlayerESUpdated); }
-        /// <summary><c>libvlc_MediaPlayerESSelected</c>.</summary>
-        public event EventHandler<EsSelectionChangedEventArgs> ESSelected { add => Events.Attach(ref _esSelected, value, libvlc_event_e.libvlc_MediaPlayerESSelected); remove => Events.Detach(ref _esSelected, value, libvlc_event_e.libvlc_MediaPlayerESSelected); }
-        /// <summary><c>libvlc_MediaPlayerAudioVolume</c>.</summary>
-        public event EventHandler<AudioVolumeEventArgs> AudioVolume { add => Events.Attach(ref _audioVolume, value, libvlc_event_e.libvlc_MediaPlayerAudioVolume); remove => Events.Detach(ref _audioVolume, value, libvlc_event_e.libvlc_MediaPlayerAudioVolume); }
-        /// <summary><c>libvlc_MediaPlayerAudioDevice</c>.</summary>
-        public event EventHandler<AudioDeviceEventArgs> AudioDevice { add => Events.Attach(ref _audioDevice, value, libvlc_event_e.libvlc_MediaPlayerAudioDevice); remove => Events.Detach(ref _audioDevice, value, libvlc_event_e.libvlc_MediaPlayerAudioDevice); }
-        /// <summary><c>libvlc_MediaPlayerProgramAdded</c>.</summary>
-        public event EventHandler<ProgramEventArgs> ProgramAdded { add => Events.Attach(ref _programAdded, value, libvlc_event_e.libvlc_MediaPlayerProgramAdded); remove => Events.Detach(ref _programAdded, value, libvlc_event_e.libvlc_MediaPlayerProgramAdded); }
-        /// <summary><c>libvlc_MediaPlayerProgramDeleted</c>.</summary>
-        public event EventHandler<ProgramEventArgs> ProgramDeleted { add => Events.Attach(ref _programDeleted, value, libvlc_event_e.libvlc_MediaPlayerProgramDeleted); remove => Events.Detach(ref _programDeleted, value, libvlc_event_e.libvlc_MediaPlayerProgramDeleted); }
-        /// <summary><c>libvlc_MediaPlayerProgramUpdated</c>.</summary>
-        public event EventHandler<ProgramEventArgs> ProgramUpdated { add => Events.Attach(ref _programUpdated, value, libvlc_event_e.libvlc_MediaPlayerProgramUpdated); remove => Events.Detach(ref _programUpdated, value, libvlc_event_e.libvlc_MediaPlayerProgramUpdated); }
-        /// <summary><c>libvlc_MediaPlayerProgramSelected</c>.</summary>
-        public event EventHandler<ProgramSelectionChangedEventArgs> ProgramSelected { add => Events.Attach(ref _programSelected, value, libvlc_event_e.libvlc_MediaPlayerProgramSelected); remove => Events.Detach(ref _programSelected, value, libvlc_event_e.libvlc_MediaPlayerProgramSelected); }
-        /// <summary><c>libvlc_MediaPlayerTitleSelectionChanged</c>.</summary>
-        public event EventHandler<TitleSelectionChangedEventArgs> TitleSelectionChanged { add => Events.Attach(ref _titleSelectionChanged, value, libvlc_event_e.libvlc_MediaPlayerTitleSelectionChanged); remove => Events.Detach(ref _titleSelectionChanged, value, libvlc_event_e.libvlc_MediaPlayerTitleSelectionChanged); }
-        /// <summary><c>libvlc_MediaPlayerChapterChanged</c>.</summary>
-        public event EventHandler<ChapterChangedEventArgs> ChapterChanged { add => Events.Attach(ref _chapterChanged, value, libvlc_event_e.libvlc_MediaPlayerChapterChanged); remove => Events.Detach(ref _chapterChanged, value, libvlc_event_e.libvlc_MediaPlayerChapterChanged); }
-        /// <summary><c>libvlc_MediaPlayerRecordChanged</c>.</summary>
-        public event EventHandler<RecordChangedEventArgs> RecordChanged { add => Events.Attach(ref _recordChanged, value, libvlc_event_e.libvlc_MediaPlayerRecordChanged); remove => Events.Detach(ref _recordChanged, value, libvlc_event_e.libvlc_MediaPlayerRecordChanged); }
+        /// <summary><c>on_media_changed</c> — the played media changed.</summary>
+        public event EventHandler<MediaEventArgs>? MediaChanged;
+        /// <summary><c>on_media_stopping</c> — the current media is stopping (carries the reason).</summary>
+        public event EventHandler<MediaStoppingEventArgs>? MediaStopping;
+        /// <summary><c>on_state_changed</c> — the player state changed.</summary>
+        public event EventHandler<StateChangedEventArgs>? StateChanged;
+        /// <summary><c>on_buffering_changed</c> — buffering progress in [0, 100].</summary>
+        public event EventHandler<BufferingEventArgs>? BufferingChanged;
+        /// <summary><c>on_capabilities_changed</c> — seek/pause/rate/rewind capabilities changed.</summary>
+        public event EventHandler<CapabilitiesChangedEventArgs>? CapabilitiesChanged;
+        /// <summary><c>on_position_changed</c> — playback time (ms) and position [0,1] changed (high frequency).</summary>
+        public event EventHandler<PositionChangedEventArgs>? PositionChanged;
+        /// <summary><c>on_length_changed</c> — media length (ms) changed.</summary>
+        public event EventHandler<LengthChangedEventArgs>? LengthChanged;
+        /// <summary><c>on_track_list_changed</c> — a track was added/removed/updated.</summary>
+        public event EventHandler<TrackListChangedEventArgs>? TrackListChanged;
+        /// <summary><c>on_track_selection_changed</c> — the selected track of a type changed.</summary>
+        public event EventHandler<TrackSelectionChangedEventArgs>? TrackSelectionChanged;
+        /// <summary><c>on_program_list_changed</c> — a program was added/removed/updated.</summary>
+        public event EventHandler<ProgramListChangedEventArgs>? ProgramListChanged;
+        /// <summary><c>on_program_selection_changed</c> — the selected program changed.</summary>
+        public event EventHandler<ProgramSelectionChangedEventArgs>? ProgramSelectionChanged;
+        /// <summary><c>on_titles_changed</c> — the title list changed.</summary>
+        public event EventHandler? TitlesChanged;
+        /// <summary><c>on_title_selection_changed</c> — the selected title changed.</summary>
+        public event EventHandler<TitleSelectionChangedEventArgs>? TitleSelectionChanged;
+        /// <summary><c>on_chapter_selection_changed</c> — the selected chapter changed.</summary>
+        public event EventHandler<ChapterSelectionChangedEventArgs>? ChapterSelectionChanged;
+        /// <summary><c>on_recording_changed</c> — recording started/stopped.</summary>
+        public event EventHandler<RecordingChangedEventArgs>? RecordingChanged;
+        /// <summary><c>on_screenshot_taken</c> — a screenshot was written.</summary>
+        public event EventHandler<ScreenshotTakenEventArgs>? ScreenshotTaken;
+        /// <summary><c>on_media_parsed</c> — the media finished parsing.</summary>
+        public event EventHandler<MediaEventArgs>? MediaParsed;
+        /// <summary><c>on_media_meta_changed</c> — a metadata field of the media changed.</summary>
+        public event EventHandler<MediaEventArgs>? MediaMetaChanged;
+        /// <summary><c>on_media_subitems_changed</c> — the media's subitems changed.</summary>
+        public event EventHandler<MediaEventArgs>? MediaSubitemsChanged;
+        /// <summary><c>on_media_attachments_added</c> — attachment pictures were found.</summary>
+        public event EventHandler<MediaAttachmentsAddedEventArgs>? MediaAttachmentsAdded;
+        /// <summary><c>on_vout_changed</c> — the number of active video outputs changed.</summary>
+        public event EventHandler<VoutChangedEventArgs>? VoutChanged;
+        /// <summary><c>on_cork_changed</c> — playback was corked/uncorked (e.g. by another app).</summary>
+        public event EventHandler<CorkChangedEventArgs>? CorkChanged;
+        /// <summary><c>on_audio_volume_changed</c> — the audio volume changed.</summary>
+        public event EventHandler<AudioVolumeChangedEventArgs>? AudioVolumeChanged;
+        /// <summary><c>on_audio_mute_changed</c> — the audio mute state changed.</summary>
+        public event EventHandler<AudioMuteChangedEventArgs>? AudioMuteChanged;
+        /// <summary><c>on_audio_device_changed</c> — the audio output device changed.</summary>
+        public event EventHandler<AudioDeviceChangedEventArgs>? AudioDeviceChanged;
+
+        // --- shared callback registration: one cbs struct + one set of delegates for the whole process ---
+
+        private static MediaPlayer? Owner(IntPtr opaque) =>
+            opaque == IntPtr.Zero ? null : GCHandle.FromIntPtr(opaque).Target as MediaPlayer;
+
+        // cdecl delegate types matching the libvlc_media_player_cbs function-pointer fields.
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DVoid(IntPtr o);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DMedia(IntPtr o, libvlc_media_t* m);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DMediaStopping(IntPtr o, libvlc_media_t* m, libvlc_stopping_reason_t r);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DState(IntPtr o, libvlc_state_t s);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DFloat(IntPtr o, float v);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DCaps(IntPtr o, libvlc_capability_t a, libvlc_capability_t b);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DPosition(IntPtr o, long t, double p);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DTime(IntPtr o, long t);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DTrackList(IntPtr o, libvlc_list_action_t a, libvlc_track_type_t t, byte* id);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DTrackSel(IntPtr o, libvlc_track_type_t t, byte* u, byte* s);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DProgramList(IntPtr o, libvlc_list_action_t a, int id);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DIntInt(IntPtr o, int a, int b);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DTitleSel(IntPtr o, libvlc_title_description_t* t, uint i);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DChapterSel(IntPtr o, libvlc_title_description_t* t, uint ti, libvlc_chapter_description_t* c, uint ci);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DRecording(IntPtr o, byte rec, byte* path);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DString(IntPtr o, byte* s);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DAttachments(IntPtr o, libvlc_media_t* m, libvlc_picture_list_t* l);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DUInt(IntPtr o, uint v);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void DBool(IntPtr o, byte v);
+
+        // Delegate instances rooted for the process lifetime (libvlc holds their function pointers).
+        private static readonly DMedia s_mediaChanged = (o, m) => { var p = Owner(o); p?.MediaChanged?.Invoke(p, new MediaEventArgs((IntPtr)m)); };
+        private static readonly DMediaStopping s_mediaStopping = (o, m, r) => { var p = Owner(o); p?.MediaStopping?.Invoke(p, new MediaStoppingEventArgs((IntPtr)m, (StoppingReason)r)); };
+        private static readonly DState s_stateChanged = (o, s) => { var p = Owner(o); p?.StateChanged?.Invoke(p, new StateChangedEventArgs((State)s)); };
+        private static readonly DFloat s_bufferingChanged = (o, v) => { var p = Owner(o); p?.BufferingChanged?.Invoke(p, new BufferingEventArgs(v)); };
+        private static readonly DCaps s_capabilitiesChanged = (o, a, b) => { var p = Owner(o); p?.CapabilitiesChanged?.Invoke(p, new CapabilitiesChangedEventArgs((Capability)a, (Capability)b)); };
+        private static readonly DPosition s_positionChanged = (o, t, pos) => { var p = Owner(o); p?.PositionChanged?.Invoke(p, new PositionChangedEventArgs(t, pos)); };
+        private static readonly DTime s_lengthChanged = (o, t) => { var p = Owner(o); p?.LengthChanged?.Invoke(p, new LengthChangedEventArgs(t)); };
+        private static readonly DTrackList s_trackListChanged = (o, a, t, id) => { var p = Owner(o); p?.TrackListChanged?.Invoke(p, new TrackListChangedEventArgs((ListAction)a, (TrackType)t, ((IntPtr)id).GetUtf8())); };
+        private static readonly DTrackSel s_trackSelectionChanged = (o, t, u, s) => { var p = Owner(o); p?.TrackSelectionChanged?.Invoke(p, new TrackSelectionChangedEventArgs((TrackType)t, ((IntPtr)u).GetUtf8(), ((IntPtr)s).GetUtf8())); };
+        private static readonly DProgramList s_programListChanged = (o, a, id) => { var p = Owner(o); p?.ProgramListChanged?.Invoke(p, new ProgramListChangedEventArgs((ListAction)a, id)); };
+        private static readonly DIntInt s_programSelectionChanged = (o, u, s) => { var p = Owner(o); p?.ProgramSelectionChanged?.Invoke(p, new ProgramSelectionChangedEventArgs(u, s)); };
+        private static readonly DVoid s_titlesChanged = (o) => { var p = Owner(o); p?.TitlesChanged?.Invoke(p, EventArgs.Empty); };
+        private static readonly DTitleSel s_titleSelectionChanged = (o, t, i) => { var p = Owner(o); p?.TitleSelectionChanged?.Invoke(p, new TitleSelectionChangedEventArgs((IntPtr)t, (int)i)); };
+        private static readonly DChapterSel s_chapterSelectionChanged = (o, t, ti, c, ci) => { var p = Owner(o); p?.ChapterSelectionChanged?.Invoke(p, new ChapterSelectionChangedEventArgs((IntPtr)t, (int)ti, (IntPtr)c, (int)ci)); };
+        private static readonly DRecording s_recordingChanged = (o, rec, path) => { var p = Owner(o); p?.RecordingChanged?.Invoke(p, new RecordingChangedEventArgs(rec.ToBool(), ((IntPtr)path).GetUtf8())); };
+        private static readonly DString s_screenshotTaken = (o, s) => { var p = Owner(o); p?.ScreenshotTaken?.Invoke(p, new ScreenshotTakenEventArgs(((IntPtr)s).GetUtf8())); };
+        private static readonly DMedia s_mediaParsed = (o, m) => { var p = Owner(o); p?.MediaParsed?.Invoke(p, new MediaEventArgs((IntPtr)m)); };
+        private static readonly DMedia s_mediaMetaChanged = (o, m) => { var p = Owner(o); p?.MediaMetaChanged?.Invoke(p, new MediaEventArgs((IntPtr)m)); };
+        private static readonly DMedia s_mediaSubitemsChanged = (o, m) => { var p = Owner(o); p?.MediaSubitemsChanged?.Invoke(p, new MediaEventArgs((IntPtr)m)); };
+        private static readonly DAttachments s_mediaAttachmentsAdded = (o, m, l) => { var p = Owner(o); p?.MediaAttachmentsAdded?.Invoke(p, new MediaAttachmentsAddedEventArgs((IntPtr)m, (IntPtr)l)); };
+        private static readonly DUInt s_voutChanged = (o, n) => { var p = Owner(o); p?.VoutChanged?.Invoke(p, new VoutChangedEventArgs((int)n)); };
+        private static readonly DBool s_corkChanged = (o, b) => { var p = Owner(o); p?.CorkChanged?.Invoke(p, new CorkChangedEventArgs(b.ToBool())); };
+        private static readonly DFloat s_audioVolumeChanged = (o, v) => { var p = Owner(o); p?.AudioVolumeChanged?.Invoke(p, new AudioVolumeChangedEventArgs(v)); };
+        private static readonly DBool s_audioMuteChanged = (o, b) => { var p = Owner(o); p?.AudioMuteChanged?.Invoke(p, new AudioMuteChangedEventArgs(b.ToBool())); };
+        private static readonly DString s_audioDeviceChanged = (o, s) => { var p = Owner(o); p?.AudioDeviceChanged?.Invoke(p, new AudioDeviceChangedEventArgs(((IntPtr)s).GetUtf8())); };
+
+        // The shared cbs struct, built once. TODO(libvlc4-cbs): the binding does not export
+        // LIBVLC_MEDIA_PLAYER_CBS_VER — verify version 0 against the VLC header (if libvlc_media_player_new
+        // returns NULL the value is wrong).
+        private static readonly libvlc_media_player_cbs s_cbs = new libvlc_media_player_cbs
+        {
+            version = 0,
+            on_media_changed = Marshal.GetFunctionPointerForDelegate(s_mediaChanged),
+            on_media_stopping = Marshal.GetFunctionPointerForDelegate(s_mediaStopping),
+            on_state_changed = Marshal.GetFunctionPointerForDelegate(s_stateChanged),
+            on_buffering_changed = Marshal.GetFunctionPointerForDelegate(s_bufferingChanged),
+            on_capabilities_changed = Marshal.GetFunctionPointerForDelegate(s_capabilitiesChanged),
+            on_position_changed = Marshal.GetFunctionPointerForDelegate(s_positionChanged),
+            on_length_changed = Marshal.GetFunctionPointerForDelegate(s_lengthChanged),
+            on_track_list_changed = Marshal.GetFunctionPointerForDelegate(s_trackListChanged),
+            on_track_selection_changed = Marshal.GetFunctionPointerForDelegate(s_trackSelectionChanged),
+            on_program_list_changed = Marshal.GetFunctionPointerForDelegate(s_programListChanged),
+            on_program_selection_changed = Marshal.GetFunctionPointerForDelegate(s_programSelectionChanged),
+            on_titles_changed = Marshal.GetFunctionPointerForDelegate(s_titlesChanged),
+            on_title_selection_changed = Marshal.GetFunctionPointerForDelegate(s_titleSelectionChanged),
+            on_chapter_selection_changed = Marshal.GetFunctionPointerForDelegate(s_chapterSelectionChanged),
+            on_recording_changed = Marshal.GetFunctionPointerForDelegate(s_recordingChanged),
+            on_screenshot_taken = Marshal.GetFunctionPointerForDelegate(s_screenshotTaken),
+            on_media_parsed = Marshal.GetFunctionPointerForDelegate(s_mediaParsed),
+            on_media_meta_changed = Marshal.GetFunctionPointerForDelegate(s_mediaMetaChanged),
+            on_media_subitems_changed = Marshal.GetFunctionPointerForDelegate(s_mediaSubitemsChanged),
+            on_media_attachments_added = Marshal.GetFunctionPointerForDelegate(s_mediaAttachmentsAdded),
+            on_vout_changed = Marshal.GetFunctionPointerForDelegate(s_voutChanged),
+            on_cork_changed = Marshal.GetFunctionPointerForDelegate(s_corkChanged),
+            on_audio_volume_changed = Marshal.GetFunctionPointerForDelegate(s_audioVolumeChanged),
+            on_audio_mute_changed = Marshal.GetFunctionPointerForDelegate(s_audioMuteChanged),
+            on_audio_device_changed = Marshal.GetFunctionPointerForDelegate(s_audioDeviceChanged),
+        };
+
+        // The shared player cbs, exposed so MediaListPlayer can register the same callbacks on its internal
+        // media player via libvlc_media_list_player_new(cbs); it then routes the cbs opaque (a GCHandle) to
+        // the wrapped MediaPlayer so that player's events fire too — keeping every surfaced player uniform.
+        internal static libvlc_media_player_cbs SharedCbs => s_cbs;
     }
 
-    /// <summary>A playback time observation delivered to <see cref="MediaPlayer.WatchTime"/>. <c>libvlc_media_player_time_point_t</c>.</summary>
+    /// <summary><c>libvlc_media_player_time_point_t</c>.</summary>
     public readonly struct MediaTimePoint
     {
         internal unsafe MediaTimePoint(libvlc_media_player_time_point_t* p)
@@ -1151,5 +1224,299 @@ namespace LibVLCSharp.Core
         {
             Name = name; TimeOffsetMs = timeOffsetMs; DurationMs = durationMs;
         }
+    }
+
+    /// <summary>
+    /// Optional batch of handlers passed to a <see cref="MediaPlayer"/> constructor; each non-null handler
+    /// is subscribed to the matching event. Equivalent to subscribing with <c>+=</c> after construction.
+    /// </summary>
+    public sealed class MediaPlayerCallbacks
+    {
+        public EventHandler<MediaEventArgs>? MediaChanged;
+        public EventHandler<MediaStoppingEventArgs>? MediaStopping;
+        public EventHandler<StateChangedEventArgs>? StateChanged;
+        public EventHandler<BufferingEventArgs>? BufferingChanged;
+        public EventHandler<CapabilitiesChangedEventArgs>? CapabilitiesChanged;
+        public EventHandler<PositionChangedEventArgs>? PositionChanged;
+        public EventHandler<LengthChangedEventArgs>? LengthChanged;
+        public EventHandler<TrackListChangedEventArgs>? TrackListChanged;
+        public EventHandler<TrackSelectionChangedEventArgs>? TrackSelectionChanged;
+        public EventHandler<ProgramListChangedEventArgs>? ProgramListChanged;
+        public EventHandler<ProgramSelectionChangedEventArgs>? ProgramSelectionChanged;
+        public EventHandler? TitlesChanged;
+        public EventHandler<TitleSelectionChangedEventArgs>? TitleSelectionChanged;
+        public EventHandler<ChapterSelectionChangedEventArgs>? ChapterSelectionChanged;
+        public EventHandler<RecordingChangedEventArgs>? RecordingChanged;
+        public EventHandler<ScreenshotTakenEventArgs>? ScreenshotTaken;
+        public EventHandler<MediaEventArgs>? MediaParsed;
+        public EventHandler<MediaEventArgs>? MediaMetaChanged;
+        public EventHandler<MediaEventArgs>? MediaSubitemsChanged;
+        public EventHandler<MediaAttachmentsAddedEventArgs>? MediaAttachmentsAdded;
+        public EventHandler<VoutChangedEventArgs>? VoutChanged;
+        public EventHandler<CorkChangedEventArgs>? CorkChanged;
+        public EventHandler<AudioVolumeChangedEventArgs>? AudioVolumeChanged;
+        public EventHandler<AudioMuteChangedEventArgs>? AudioMuteChanged;
+        public EventHandler<AudioDeviceChangedEventArgs>? AudioDeviceChanged;
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // Event payloads for MediaPlayer (libvlc_media_player_cbs). All are readonly structs delivered via
+    // EventHandler<T> (no boxing). Payloads wrapping a borrowed native pointer are valid only for the
+    // duration of the handler — call their GetXxx method inside the handler (default retains a copy).
+    // ----------------------------------------------------------------------------------------------
+
+    /// <summary>Carries a borrowed <c>libvlc_media_t*</c> (media changed / stopping / parsed / meta / subitems).</summary>
+    public readonly struct MediaEventArgs
+    {
+        private readonly IntPtr media;
+        public MediaEventArgs(IntPtr media) => this.media = media;
+
+        /// <summary>Returns the media. <paramref name="addRef"/> true (default) retains a copy you must dispose; false is a borrowed view valid only inside the handler.</summary>
+        public unsafe Media? GetMedia(bool addRef = true)
+        {
+            var p = (libvlc_media_t*)media;
+            if (p == null) return null;
+            return addRef ? new Media((IntPtr)libvlc_media_retain(p)) : new Media((IntPtr)p, addRef: false);
+        }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.MediaStopping"/>.</summary>
+    public readonly struct MediaStoppingEventArgs
+    {
+        private readonly IntPtr media;
+        /// <summary>Why playback is stopping.</summary>
+        public readonly StoppingReason Reason;
+        public MediaStoppingEventArgs(IntPtr media, StoppingReason reason) { this.media = media; Reason = reason; }
+
+        /// <summary>Returns the media being stopped (see <see cref="MediaEventArgs.GetMedia"/>).</summary>
+        public unsafe Media? GetMedia(bool addRef = true)
+        {
+            var p = (libvlc_media_t*)media;
+            if (p == null) return null;
+            return addRef ? new Media((IntPtr)libvlc_media_retain(p)) : new Media((IntPtr)p, addRef: false);
+        }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.StateChanged"/>.</summary>
+    public readonly struct StateChangedEventArgs
+    {
+        /// <summary>The new player state.</summary>
+        public readonly State State;
+        public StateChangedEventArgs(State state) => State = state;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.BufferingChanged"/>.</summary>
+    public readonly struct BufferingEventArgs
+    {
+        /// <summary>Buffering progress in [0, 100].</summary>
+        public readonly float Cache;
+        public BufferingEventArgs(float cache) => Cache = cache;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.CapabilitiesChanged"/>.</summary>
+    public readonly struct CapabilitiesChangedEventArgs
+    {
+        /// <summary>Capabilities before the change (bitmask).</summary>
+        public readonly Capability Old;
+        /// <summary>Capabilities after the change (bitmask).</summary>
+        public readonly Capability New;
+        public CapabilitiesChangedEventArgs(Capability old, Capability @new) { Old = old; New = @new; }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.PositionChanged"/> (libvlc delivers time and position together).</summary>
+    public readonly struct PositionChangedEventArgs
+    {
+        /// <summary>New playback time in milliseconds.</summary>
+        public readonly long TimeMs;
+        /// <summary>New position in [0, 1].</summary>
+        public readonly double Position;
+        public PositionChangedEventArgs(long timeMs, double position) { TimeMs = timeMs; Position = position; }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.LengthChanged"/>.</summary>
+    public readonly struct LengthChangedEventArgs
+    {
+        /// <summary>New length in milliseconds.</summary>
+        public readonly long LengthMs;
+        public LengthChangedEventArgs(long lengthMs) => LengthMs = lengthMs;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.TrackListChanged"/>.</summary>
+    public readonly struct TrackListChangedEventArgs
+    {
+        /// <summary>Whether a track was added, removed, or updated.</summary>
+        public readonly ListAction Action;
+        /// <summary>The affected track type.</summary>
+        public readonly TrackType TrackType;
+        /// <summary>String id of the affected track (<c>psz_id</c>).</summary>
+        public readonly string? Id;
+        public TrackListChangedEventArgs(ListAction action, TrackType trackType, string? id) { Action = action; TrackType = trackType; Id = id; }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.TrackSelectionChanged"/>.</summary>
+    public readonly struct TrackSelectionChangedEventArgs
+    {
+        /// <summary>The track type whose selection changed.</summary>
+        public readonly TrackType TrackType;
+        /// <summary>Previously selected track id, or null.</summary>
+        public readonly string? UnselectedId;
+        /// <summary>Newly selected track id, or null.</summary>
+        public readonly string? SelectedId;
+        public TrackSelectionChangedEventArgs(TrackType trackType, string? unselectedId, string? selectedId) { TrackType = trackType; UnselectedId = unselectedId; SelectedId = selectedId; }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.ProgramListChanged"/>.</summary>
+    public readonly struct ProgramListChangedEventArgs
+    {
+        /// <summary>Whether a program was added, removed, or updated.</summary>
+        public readonly ListAction Action;
+        /// <summary>Program (group) id.</summary>
+        public readonly int Id;
+        public ProgramListChangedEventArgs(ListAction action, int id) { Action = action; Id = id; }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.ProgramSelectionChanged"/>.</summary>
+    public readonly struct ProgramSelectionChangedEventArgs
+    {
+        /// <summary>Previously selected program id, or -1.</summary>
+        public readonly int UnselectedId;
+        /// <summary>Newly selected program id, or -1.</summary>
+        public readonly int SelectedId;
+        public ProgramSelectionChangedEventArgs(int unselectedId, int selectedId) { UnselectedId = unselectedId; SelectedId = selectedId; }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.TitleSelectionChanged"/>.</summary>
+    public readonly struct TitleSelectionChangedEventArgs
+    {
+        private readonly IntPtr title; // borrowed const libvlc_title_description_t*
+        /// <summary>Selected title index.</summary>
+        public readonly int Index;
+        public TitleSelectionChangedEventArgs(IntPtr title, int index) { this.title = title; Index = index; }
+
+        /// <summary>Reads the selected title description (call inside the handler; pointer is borrowed).</summary>
+        public unsafe TitleDescription? GetTitleDescription()
+        {
+            var td = (libvlc_title_description_t*)title;
+            if (td == null) return null;
+            return new TitleDescription(((IntPtr)td->psz_name).GetUtf8(), td->i_duration, td->i_flags);
+        }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.ChapterSelectionChanged"/>.</summary>
+    public readonly struct ChapterSelectionChangedEventArgs
+    {
+        private readonly IntPtr title;   // borrowed const libvlc_title_description_t*
+        private readonly IntPtr chapter; // borrowed const libvlc_chapter_description_t*
+        /// <summary>Index of the title the chapter belongs to.</summary>
+        public readonly int TitleIndex;
+        /// <summary>Selected chapter index.</summary>
+        public readonly int ChapterIndex;
+        public ChapterSelectionChangedEventArgs(IntPtr title, int titleIndex, IntPtr chapter, int chapterIndex)
+        { this.title = title; TitleIndex = titleIndex; this.chapter = chapter; ChapterIndex = chapterIndex; }
+
+        /// <summary>Reads the title description (call inside the handler; pointer is borrowed).</summary>
+        public unsafe TitleDescription? GetTitleDescription()
+        {
+            var td = (libvlc_title_description_t*)title;
+            if (td == null) return null;
+            return new TitleDescription(((IntPtr)td->psz_name).GetUtf8(), td->i_duration, td->i_flags);
+        }
+
+        /// <summary>Reads the chapter description (call inside the handler; pointer is borrowed).</summary>
+        public unsafe ChapterDescription? GetChapterDescription()
+        {
+            var cd = (libvlc_chapter_description_t*)chapter;
+            if (cd == null) return null;
+            return new ChapterDescription(((IntPtr)cd->psz_name).GetUtf8(), cd->i_time_offset, cd->i_duration);
+        }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.RecordingChanged"/>.</summary>
+    public readonly struct RecordingChangedEventArgs
+    {
+        /// <summary>True if recording started, false if it stopped.</summary>
+        public readonly bool Recording;
+        /// <summary>Path of the recorded file when recording stops, otherwise null.</summary>
+        public readonly string? FilePath;
+        public RecordingChangedEventArgs(bool recording, string? filePath) { Recording = recording; FilePath = filePath; }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.ScreenshotTaken"/>.</summary>
+    public readonly struct ScreenshotTakenEventArgs
+    {
+        /// <summary>Path the screenshot was written to.</summary>
+        public readonly string? FilePath;
+        public ScreenshotTakenEventArgs(string? filePath) => FilePath = filePath;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.MediaAttachmentsAdded"/>.</summary>
+    public readonly struct MediaAttachmentsAddedEventArgs
+    {
+        private readonly IntPtr media;        // borrowed libvlc_media_t*
+        private readonly IntPtr attachments;  // borrowed libvlc_picture_list_t*
+        public MediaAttachmentsAddedEventArgs(IntPtr media, IntPtr attachments) { this.media = media; this.attachments = attachments; }
+
+        /// <summary>Returns the media the attachments belong to (see <see cref="MediaEventArgs.GetMedia"/>).</summary>
+        public unsafe Media? GetMedia(bool addRef = true)
+        {
+            var p = (libvlc_media_t*)media;
+            if (p == null) return null;
+            return addRef ? new Media((IntPtr)libvlc_media_retain(p)) : new Media((IntPtr)p, addRef: false);
+        }
+
+        /// <summary>Returns the attachment pictures. Must be called inside the handler (the list is borrowed). <paramref name="owner"/> true retains each picture (dispose them); false gives borrowed views.</summary>
+        public unsafe IReadOnlyList<Picture> GetAttachments(bool owner = true)
+        {
+            var list = (libvlc_picture_list_t*)attachments;
+            if (list == null) return Array.Empty<Picture>();
+            int count = (int)libvlc_picture_list_count(list).ToUInt32();
+            var pictures = new Picture[count];
+            for (int i = 0; i < count; i++)
+            {
+                var pic = libvlc_picture_list_at(list, new UIntPtr((uint)i)); // borrowed
+                pictures[i] = owner ? new Picture((IntPtr)libvlc_picture_retain(pic)) : new Picture((IntPtr)pic, addRef: false);
+            }
+            return pictures;
+        }
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.VoutChanged"/>.</summary>
+    public readonly struct VoutChangedEventArgs
+    {
+        /// <summary>Number of active video outputs.</summary>
+        public readonly int Count;
+        public VoutChangedEventArgs(int count) => Count = count;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.CorkChanged"/>.</summary>
+    public readonly struct CorkChangedEventArgs
+    {
+        /// <summary>True if playback is now corked (should pause), false if uncorked.</summary>
+        public readonly bool Corked;
+        public CorkChangedEventArgs(bool corked) => Corked = corked;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.AudioVolumeChanged"/>.</summary>
+    public readonly struct AudioVolumeChangedEventArgs
+    {
+        /// <summary>New volume (1.0 = 100%).</summary>
+        public readonly float Volume;
+        public AudioVolumeChangedEventArgs(float volume) => Volume = volume;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.AudioMuteChanged"/>.</summary>
+    public readonly struct AudioMuteChangedEventArgs
+    {
+        /// <summary>True if audio is now muted.</summary>
+        public readonly bool Muted;
+        public AudioMuteChangedEventArgs(bool muted) => Muted = muted;
+    }
+
+    /// <summary>Payload of <see cref="MediaPlayer.AudioDeviceChanged"/>.</summary>
+    public readonly struct AudioDeviceChangedEventArgs
+    {
+        /// <summary>The new audio output device id.</summary>
+        public readonly string? Device;
+        public AudioDeviceChangedEventArgs(string? device) => Device = device;
     }
 }

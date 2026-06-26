@@ -125,53 +125,44 @@ namespace LibVLCSharp.Core
         /// Creates an empty <see cref="MediaPlayer"/> bound to this instance. <c>libvlc_media_player_new</c>.
         /// </summary>
         /// <returns>A new media player, or throws on error.</returns>
-        public MediaPlayer CreateMediaPlayer() => new MediaPlayer((IntPtr)libvlc_media_player_new(this));
+        public MediaPlayer CreateMediaPlayer() => new MediaPlayer(this);
 
         /// <summary>
         /// Creates a <see cref="MediaPlayer"/> from a <see cref="Media"/> object. <c>libvlc_media_player_new_from_media</c>.
         /// </summary>
         /// <param name="media">The media to load. The media may be safely released after this call.</param>
         /// <returns>A new media player, or throws on error.</returns>
-        public MediaPlayer CreateMediaPlayer(Media media) => new MediaPlayer((IntPtr)libvlc_media_player_new_from_media(this, media));
+        public MediaPlayer CreateMediaPlayer(Media media) => new MediaPlayer(this, media);
 
         /// <summary>
         /// Creates a new <see cref="MediaListPlayer"/>. <c>libvlc_media_list_player_new</c>.
         /// </summary>
         /// <returns>A new media list player instance, or throws on error.</returns>
-        public MediaListPlayer CreateMediaListPlayer() => new MediaListPlayer((IntPtr)libvlc_media_list_player_new(this));
+        public MediaListPlayer CreateMediaListPlayer() => new MediaListPlayer(this);
 
         /// <summary>
         /// Creates a <see cref="MediaDiscoverer"/> object by service name. <c>libvlc_media_discoverer_new</c>.
-        /// After creation, attach to media list events to be notified of newly discovered items, then
-        /// call <see cref="MediaDiscoverer.Start"/> to begin discovery.
+        /// After creation, subscribe to <see cref="MediaDiscoverer.MediaAdded"/> / <see cref="MediaDiscoverer.MediaRemoved"/>,
+        /// then call <see cref="MediaDiscoverer.Start"/> to begin discovery.
         /// </summary>
         /// <param name="name">
         /// Service name; use <see cref="MediaDiscoverers"/> to get the discoverer names available in this
         /// instance.
         /// </param>
         /// <returns>A new media discoverer, or throws on error.</returns>
-        /// <remarks>Since LibVLC 3.0.0.</remarks>
-        public MediaDiscoverer CreateMediaDiscoverer(string name)
-        {
-            using var u = new Utf8Buffer(name);
-            return new MediaDiscoverer((IntPtr)libvlc_media_discoverer_new(this, u));
-        }
+        public MediaDiscoverer CreateMediaDiscoverer(string name) => new MediaDiscoverer(this, name);
+
         /// <summary>
         /// Creates a <see cref="RendererDiscoverer"/> object by service name. <c>libvlc_renderer_discoverer_new</c>.
-        /// After creation, attach to events to be notified of discovered renderers, then call
-        /// <see cref="RendererDiscoverer.Start"/> to begin discovery.
+        /// After creation, subscribe to <see cref="RendererDiscoverer.ItemAdded"/> / <see cref="RendererDiscoverer.ItemRemoved"/>,
+        /// then call <see cref="RendererDiscoverer.Start"/> to begin discovery.
         /// </summary>
         /// <param name="name">
         /// Service name; use <see cref="RendererDiscoverers"/> to get the discoverer names available in
         /// this instance.
         /// </param>
         /// <returns>A new renderer discoverer, or throws on error.</returns>
-        /// <remarks>Since LibVLC 3.0.0.</remarks>
-        public RendererDiscoverer CreateRendererDiscoverer(string name)
-        {
-            using var u = new Utf8Buffer(name);
-            return new RendererDiscoverer((IntPtr)libvlc_renderer_discoverer_new(this, u));
-        }
+        public RendererDiscoverer CreateRendererDiscoverer(string name) => new RendererDiscoverer(this, name);
 
         // --- instance configuration ---
 

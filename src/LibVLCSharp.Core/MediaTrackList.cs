@@ -146,9 +146,10 @@ namespace LibVLCSharp.Core
             Bitrate = t->i_bitrate;
             IsSelected = t->selected.ToBool();
             InternalId = t->i_id;
-            Audio = Type == TrackType.Audio && t->Anonymous.audio != null ? new AudioTrackInfo(t->Anonymous.audio) : (AudioTrackInfo?)null;
-            Video = Type == TrackType.Video && t->Anonymous.video != null ? new VideoTrackInfo(t->Anonymous.video) : (VideoTrackInfo?)null;
-            SubtitleEncoding = Type == TrackType.Text && t->Anonymous.subtitle != null ? ((IntPtr)t->Anonymous.subtitle->psz_encoding).GetUtf8() : null;
+            // libvlc 4.0 nightly 202606260430 renamed the anonymous union field from Anonymous to u (union libvlc_media_track_data).
+            Audio = Type == TrackType.Audio && t->u.audio != null ? new AudioTrackInfo(t->u.audio) : (AudioTrackInfo?)null;
+            Video = Type == TrackType.Video && t->u.video != null ? new VideoTrackInfo(t->u.video) : (VideoTrackInfo?)null;
+            SubtitleEncoding = Type == TrackType.Text && t->u.subtitle != null ? ((IntPtr)t->u.subtitle->psz_encoding).GetUtf8() : null;
         }
 
         /// <summary>Track kind (audio/video/text). <c>i_type</c>.</summary>

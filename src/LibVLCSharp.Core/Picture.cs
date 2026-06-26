@@ -14,7 +14,7 @@ namespace LibVLCSharp.Core
         /// <summary>
         /// Wraps a native handle. When <paramref name="addRef"/> is <c>false</c> the picture is a borrowed
         /// view that is never released and is valid only for as long as its owner keeps it alive
-        /// (e.g. a picture obtained from <see cref="AttachedThumbnailsFoundEventArgs.GetThumbnails"/> with
+        /// (e.g. a picture obtained from <c>AttachedThumbnailsFoundEventArgs.GetThumbnails</c> with
         /// <c>owner: false</c>, valid only inside the event handler). Do not dispose a borrowed picture.
         /// </summary>
         /// <param name="handle">Native <c>libvlc_picture_t*</c>.</param>

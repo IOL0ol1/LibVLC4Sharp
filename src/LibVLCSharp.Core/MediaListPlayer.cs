@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using LibVLCSharp.Core.Interop;
 using static LibVLCSharp.Core.Interop.libvlc;
 
@@ -12,11 +13,32 @@ namespace LibVLCSharp.Core
     /// </summary>
     public unsafe class MediaListPlayer : NativeReference
     {
-        private EventManager? _events;
+        // cbs opaque (a GCHandle) handed to libvlc_media_list_player_new; libvlc registers the shared
+        // MediaPlayer callbacks on the list player's internal media player with it. The MediaPlayer getter
+        // points this GCHandle's target at the wrapped player so its events fire (uniform with CreateMediaPlayer).
+        private GCHandle _playerCbs;
 
-        /// <summary>Wraps an existing native handle.</summary>
-        /// <param name="handle">Native <c>libvlc_media_list_player_t*</c>.</param>
-        public MediaListPlayer(IntPtr handle) : base(handle) { }
+        /// <summary>Creates a media list player bound to <paramref name="vlc"/>, with its internal player's events wired. <c>libvlc_media_list_player_new</c>.</summary>
+        internal MediaListPlayer(LibVLC vlc) : this(Create(vlc)) { }
+
+        private MediaListPlayer(Creation c) : base(c.Handle) => _playerCbs = c.Opaque;
+
+        private readonly struct Creation
+        {
+            public readonly IntPtr Handle;
+            public readonly GCHandle Opaque;
+            public Creation(IntPtr handle, GCHandle opaque) { Handle = handle; Opaque = opaque; }
+        }
+
+        private static Creation Create(LibVLC vlc)
+        {
+            if (vlc is null) throw new ArgumentNullException(nameof(vlc));
+            var gch = GCHandle.Alloc(null);            // target set to the wrapped player in the MediaPlayer getter
+            var cbs = MediaPlayer.SharedCbs;            // local copy; libvlc reads it during the call
+            var handle = (IntPtr)libvlc_media_list_player_new(vlc, &cbs, GCHandle.ToIntPtr(gch));
+            if (handle == IntPtr.Zero) gch.Free();      // base ctor will throw on the null handle
+            return new Creation(handle, gch);
+        }
 
         /// <summary>Implicit conversion to the native <c>libvlc_media_list_player_t*</c> (null for a null player).</summary>
         public static implicit operator libvlc_media_list_player_t*(MediaListPlayer? mediaListPlayer) =>
@@ -24,8 +46,8 @@ namespace LibVLCSharp.Core
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) _events?.Dispose();
-            base.Dispose(disposing);
+            base.Dispose(disposing);                    // release the list player; after this libvlc won't call back
+            if (_playerCbs.IsAllocated) _playerCbs.Free();
         }
 
         protected override void Release(IntPtr handle) =>
@@ -35,22 +57,22 @@ namespace LibVLCSharp.Core
         private MediaList? _mediaList;
 
         /// <summary>
-        /// The underlying media player used by this media list player.
-        /// Setter: <c>libvlc_media_list_player_set_media_player</c> — replaces the current media
-        /// player instance.
-        /// Getter: <c>libvlc_media_list_player_get_media_player</c> — returns the same instance you
-        /// assigned (the extra reference the getter takes is released). If the player was changed
-        /// outside this wrapper, a new owning wrapper is returned (dispose it yourself).
+        /// The internal media player used by this media list player.
+        /// <c>libvlc_media_list_player_get_media_player</c> — returns a cached owning wrapper; the extra
+        /// reference the getter takes is released. Its events are wired: the shared player callbacks were
+        /// registered on this player at <see cref="LibVLC.CreateMediaListPlayer"/>, and accessing this
+        /// getter routes them to the returned <see cref="Core.MediaPlayer"/>.
         /// </summary>
+        /// <remarks>libvlc 4.0 removed <c>libvlc_media_list_player_set_media_player</c>; the player is bound at construction.</remarks>
         public MediaPlayer? MediaPlayer
         {
-            get => Reconcile(ref _mediaPlayer, (IntPtr)libvlc_media_list_player_get_media_player(this), // +1 ref, or null
-                static h => libvlc_media_player_release((libvlc_media_player_t*)h),
-                static h => new MediaPlayer(h));
-            set
+            get
             {
-                _mediaPlayer = value;
-                libvlc_media_list_player_set_media_player(this, value);
+                var mp = Reconcile(ref _mediaPlayer, (IntPtr)libvlc_media_list_player_get_media_player(this), // +1 ref, or null
+                    static h => libvlc_media_player_release((libvlc_media_player_t*)h),
+                    static h => new MediaPlayer(h));
+                if (mp != null && _playerCbs.IsAllocated) _playerCbs.Target = mp; // route player callbacks to the wrapper so its events fire
+                return mp;
             }
         }
 
@@ -124,31 +146,5 @@ namespace LibVLCSharp.Core
         /// <param name="mode">The playback mode specification.</param>
         public void PlaybackMode(PlaybackMode mode) => libvlc_media_list_player_set_playback_mode(this, (libvlc_playback_mode_t)mode);
 
-        private EventManager Events =>
-            _events ??= new EventManager(libvlc_media_list_player_event_manager(this), Dispatch);
-
-        private void Dispatch(libvlc_event_t* e,IntPtr _)
-        {
-            switch ((libvlc_event_e)e->type)
-            {
-                case libvlc_event_e.libvlc_MediaListPlayerPlayed: { var h = _played; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaListPlayerStopped: { var h = _stopped; if (h != null) h(this, EventArgs.Empty); break; }
-                case libvlc_event_e.libvlc_MediaListPlayerNextItemSet:
-                    { var h = _nextItemSet; if (h != null) h(this, new MediaEventArgs((IntPtr)e->u.media_list_player_next_item_set.item)); break; }
-            }
-        }
-
-        private EventHandler? _played, _stopped;
-        private EventHandler<MediaEventArgs>? _nextItemSet;
-
-        /// <summary>Raised when the media list has been played through. <c>libvlc_MediaListPlayerPlayed</c>.</summary>
-        public event EventHandler Played { add => Events.Attach(ref _played, value, libvlc_event_e.libvlc_MediaListPlayerPlayed); remove => Events.Detach(ref _played, value, libvlc_event_e.libvlc_MediaListPlayerPlayed); }
-        /// <summary>Raised when the media list player has stopped. <c>libvlc_MediaListPlayerStopped</c>.</summary>
-        public event EventHandler Stopped { add => Events.Attach(ref _stopped, value, libvlc_event_e.libvlc_MediaListPlayerStopped); remove => Events.Detach(ref _stopped, value, libvlc_event_e.libvlc_MediaListPlayerStopped); }
-        /// <summary>
-        /// Raised when the next item in the media list has been set.
-        /// <c>libvlc_MediaListPlayerNextItemSet</c>. Call <see cref="MediaEventArgs.GetMedia"/> (default retains).
-        /// </summary>
-        public event EventHandler<MediaEventArgs> NextItemSet { add => Events.Attach(ref _nextItemSet, value, libvlc_event_e.libvlc_MediaListPlayerNextItemSet); remove => Events.Detach(ref _nextItemSet, value, libvlc_event_e.libvlc_MediaListPlayerNextItemSet); }
     }
 }

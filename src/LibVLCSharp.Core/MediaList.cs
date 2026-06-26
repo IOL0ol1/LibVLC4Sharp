@@ -12,7 +12,8 @@ namespace LibVLCSharp.Core
     /// </summary>
     public unsafe class MediaList : NativeReference, IReadOnlyList<Media>
     {
-        private EventManager? _events;
+        // libvlc 4.0 removed the media-list event manager (and there is no libvlc_media_list_cbs), so
+        // MediaList no longer raises ItemAdded/ItemDeleted events.
 
         /// <summary>Creates an empty media list. <c>libvlc_media_list_new</c>.</summary>
         /// <returns>Empty media list, or NULL on error.</returns>
@@ -25,12 +26,6 @@ namespace LibVLCSharp.Core
         /// <summary>Implicit conversion to the native <c>libvlc_media_list_t*</c> (null for a null list).</summary>
         public static implicit operator libvlc_media_list_t*(MediaList? mediaList) =>
             mediaList is null ? null : (libvlc_media_list_t*)mediaList.NativeHandle;
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) _events?.Dispose();
-            base.Dispose(disposing);
-        }
 
         protected override void Release(IntPtr handle) =>
             libvlc_media_list_release((libvlc_media_list_t*)handle);
@@ -155,32 +150,5 @@ namespace LibVLCSharp.Core
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-        private EventManager Events =>
-            _events ??= new EventManager(libvlc_media_list_event_manager(this), Dispatch);
-
-        private void Dispatch(libvlc_event_t* e,IntPtr _)
-        {
-            switch ((libvlc_event_e)e->type)
-            {
-                case libvlc_event_e.libvlc_MediaListItemAdded:
-                    { var h = _added; if (h != null) h(this, new MediaListItemEventArgs((IntPtr)e->u.media_list_item_added.item, e->u.media_list_item_added.index)); break; }
-                case libvlc_event_e.libvlc_MediaListItemDeleted:
-                    { var h = _deleted; if (h != null) h(this, new MediaListItemEventArgs((IntPtr)e->u.media_list_item_deleted.item, e->u.media_list_item_deleted.index)); break; }
-            }
-        }
-
-        private EventHandler<MediaListItemEventArgs>? _added, _deleted;
-
-        /// <summary>
-        /// Raised when a media instance is added to the list.
-        /// <c>libvlc_MediaListItemAdded</c>. Call <see cref="MediaListItemEventArgs.GetItem"/> (default retains).
-        /// </summary>
-        public event EventHandler<MediaListItemEventArgs> ItemAdded { add => Events.Attach(ref _added, value, libvlc_event_e.libvlc_MediaListItemAdded); remove => Events.Detach(ref _added, value, libvlc_event_e.libvlc_MediaListItemAdded); }
-        /// <summary>
-        /// Raised when a media instance is removed from the list.
-        /// <c>libvlc_MediaListItemDeleted</c>. Call <see cref="MediaListItemEventArgs.GetItem"/> (default retains).
-        /// </summary>
-        public event EventHandler<MediaListItemEventArgs> ItemDeleted { add => Events.Attach(ref _deleted, value, libvlc_event_e.libvlc_MediaListItemDeleted); remove => Events.Detach(ref _deleted, value, libvlc_event_e.libvlc_MediaListItemDeleted); }
     }
 }

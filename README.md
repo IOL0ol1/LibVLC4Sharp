@@ -14,6 +14,9 @@ project uses GitHub Actions + ClangSharpPInvokeGenerator to keep up-to-date P/In
 I leveraged AI for coding assistance. Most of the glue code and scripts were AI-generated, and I have     
 manually reviewed every single piece of code with fine-tuning on encapsulated implementation details.    
 
+Note: LibVLC 4.0 has not been officially released by the VLC team, so all pre-4.0 APIs are unstable.       
+You will need to pair them with VLC nightly builds.      
+
 # Introduction
 A .NET binding for **libVLC 4.x** with two layers in one package:
 

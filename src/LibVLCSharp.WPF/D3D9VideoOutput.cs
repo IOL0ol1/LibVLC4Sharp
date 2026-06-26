@@ -296,8 +296,8 @@ namespace LibVLCSharp.WPF
                 IntPtr d3d;
                 lock (_gpuLock) { d3d = _d3d; }
                 if (d3d == IntPtr.Zero) return false;
-                @out->d3d9.device = d3d;   // hand VLC our IDirect3D9Ex
-                @out->d3d9.adapter = (int)Direct3D9.D3DADAPTER_DEFAULT;
+                @out->u.d3d9.device = d3d;   // hand VLC our IDirect3D9Ex
+                @out->u.d3d9.adapter = (int)Direct3D9.D3DADAPTER_DEFAULT;
                 return true;
             }
             catch { return false; }
@@ -388,7 +388,7 @@ namespace LibVLCSharp.WPF
                     }
                     else
                     {
-                        output->d3d9_format = (uint)format;
+                        output->u.d3d9_format = (uint)format;
                         output->full_range = 1;
                         output->colorspace = libvlc_video_color_space_t.libvlc_video_colorspace_BT709;
                         output->primaries = libvlc_video_color_primaries_t.libvlc_video_primaries_BT709;
