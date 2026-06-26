@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace LibVLCSharp.Core.Interop
@@ -7,13 +6,6 @@ namespace LibVLCSharp.Core.Interop
     public partial struct libvlc_instance_t
     {
     }
-
-    public partial struct libvlc_event_manager_t
-    {
-    }
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public unsafe delegate void libvlc_callback_t([NativeTypeName("const struct libvlc_event_t *")] libvlc_event_t* p_event, [NativeTypeName("void*")] IntPtr p_data);
 
     public enum libvlc_log_level
     {
@@ -66,6 +58,18 @@ namespace LibVLCSharp.Core.Interop
 
     public partial struct libvlc_renderer_item_t
     {
+    }
+
+    public partial struct libvlc_renderer_discoverer_cbs
+    {
+        [NativeTypeName("uint32_t")]
+        public uint version;
+
+        [NativeTypeName("void (*)(void *, libvlc_renderer_item_t *)")]
+        public IntPtr on_item_added;
+
+        [NativeTypeName("void (*)(void *, libvlc_renderer_item_t *)")]
+        public IntPtr on_item_removed;
     }
 
     public partial struct libvlc_picture_t
@@ -194,8 +198,8 @@ namespace LibVLCSharp.Core.Interop
 
         public int i_level;
 
-        [NativeTypeName("__AnonymousRecord_libvlc_media_track_L103_C5")]
-        public _Anonymous_e__Union Anonymous;
+        [NativeTypeName("union libvlc_media_track_data")]
+        public libvlc_media_track_data u;
 
         [NativeTypeName("unsigned int")]
         public uint i_bitrate;
@@ -218,44 +222,8 @@ namespace LibVLCSharp.Core.Interop
         [NativeTypeName("_Bool")]
         public byte selected;
 
-        public ref libvlc_audio_track_t* audio
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->audio;
-                }
-            }
-        }
-
-        public ref libvlc_video_track_t* video
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->video;
-                }
-            }
-        }
-
-        public ref libvlc_subtitle_track_t* subtitle
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->subtitle;
-                }
-            }
-        }
-
         [StructLayout(LayoutKind.Explicit)]
-        public unsafe partial struct _Anonymous_e__Union
+        public unsafe partial struct libvlc_media_track_data
         {
             [FieldOffset(0)]
             public libvlc_audio_track_t* audio;
@@ -310,7 +278,6 @@ namespace LibVLCSharp.Core.Interop
     {
         libvlc_NothingSpecial = 0,
         libvlc_Opening,
-        libvlc_Buffering,
         libvlc_Playing,
         libvlc_Paused,
         libvlc_Stopped,
@@ -368,28 +335,6 @@ namespace LibVLCSharp.Core.Interop
         libvlc_media_type_playlist,
     }
 
-    [Flags]
-    public enum libvlc_media_parse_flag_t
-    {
-        libvlc_media_parse_local = 0x01,
-        libvlc_media_parse_network = 0x02,
-        libvlc_media_parse_forced = 0x04,
-        libvlc_media_fetch_local = 0x08,
-        libvlc_media_fetch_network = 0x10,
-        libvlc_media_do_interact = 0x20,
-    }
-
-    public enum libvlc_media_parsed_status_t
-    {
-        libvlc_media_parsed_status_none,
-        libvlc_media_parsed_status_pending,
-        libvlc_media_parsed_status_skipped,
-        libvlc_media_parsed_status_failed,
-        libvlc_media_parsed_status_timeout,
-        libvlc_media_parsed_status_cancelled,
-        libvlc_media_parsed_status_done,
-    }
-
     public enum libvlc_media_slave_type_t
     {
         libvlc_media_slave_type_subtitle,
@@ -408,31 +353,26 @@ namespace LibVLCSharp.Core.Interop
         public uint i_priority;
     }
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public unsafe delegate int libvlc_media_open_cb([NativeTypeName("void*")] IntPtr opaque, [NativeTypeName("void **")] IntPtr* datap, [NativeTypeName("uint64_t *")] ulong* sizep);
+    public partial struct libvlc_media_open_cbs
+    {
+        [NativeTypeName("uint32_t")]
+        public uint version;
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    [return: NativeTypeName("ptrdiff_t")]
-    public unsafe delegate IntPtr libvlc_media_read_cb([NativeTypeName("void*")] IntPtr opaque, [NativeTypeName("unsigned char *")] byte* buf, [NativeTypeName("size_t")] UIntPtr len);
+        [NativeTypeName("int (*)(void *, void **, uint64_t *)")]
+        public IntPtr open;
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate int libvlc_media_seek_cb([NativeTypeName("void*")] IntPtr opaque, [NativeTypeName("uint64_t")] ulong offset);
+        [NativeTypeName("ptrdiff_t (*)(void *, unsigned char *, size_t)")]
+        public IntPtr read;
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void libvlc_media_close_cb([NativeTypeName("void*")] IntPtr opaque);
+        [NativeTypeName("int (*)(void *, uint64_t)")]
+        public IntPtr seek;
+
+        [NativeTypeName("void (*)(void *)")]
+        public IntPtr close;
+    }
 
     public partial struct libvlc_media_list_t
     {
-    }
-
-    public partial struct libvlc_media_thumbnail_request_t
-    {
-    }
-
-    public enum libvlc_thumbnailer_seek_speed_t
-    {
-        libvlc_media_thumbnail_seek_precise,
-        libvlc_media_thumbnail_seek_fast,
     }
 
     public partial struct libvlc_media_player_t
@@ -441,7 +381,7 @@ namespace LibVLCSharp.Core.Interop
 
     public unsafe partial struct libvlc_title_description_t
     {
-        [NativeTypeName("int64_t")]
+        [NativeTypeName("libvlc_time_t")]
         public long i_duration;
 
         [NativeTypeName("char *")]
@@ -453,10 +393,10 @@ namespace LibVLCSharp.Core.Interop
 
     public unsafe partial struct libvlc_chapter_description_t
     {
-        [NativeTypeName("int64_t")]
+        [NativeTypeName("libvlc_time_t")]
         public long i_time_offset;
 
-        [NativeTypeName("int64_t")]
+        [NativeTypeName("libvlc_time_t")]
         public long i_duration;
 
         [NativeTypeName("char *")]
@@ -550,8 +490,111 @@ namespace LibVLCSharp.Core.Interop
         libvlc_abloop_b,
     }
 
+    public enum libvlc_capability_t
+    {
+        libvlc_capability_seek = 0x01,
+        libvlc_capability_pause = 0x02,
+        libvlc_capability_change_rate = 0x04,
+        libvlc_capability_rewind = 0x08,
+    }
+
+    public enum libvlc_list_action_t
+    {
+        libvlc_list_action_added,
+        libvlc_list_action_removed,
+        libvlc_list_action_updated,
+    }
+
+    public enum libvlc_stopping_reason_t
+    {
+        libvlc_stopping_reason_error,
+        libvlc_stopping_reason_eos,
+        libvlc_stopping_reason_user,
+    }
+
     public partial struct libvlc_equalizer_t
     {
+    }
+
+    public partial struct libvlc_media_player_cbs
+    {
+        [NativeTypeName("uint32_t")]
+        public uint version;
+
+        [NativeTypeName("void (*)(void *, libvlc_media_t *)")]
+        public IntPtr on_media_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_media_t *, libvlc_stopping_reason_t)")]
+        public IntPtr on_media_stopping;
+
+        [NativeTypeName("void (*)(void *, libvlc_state_t)")]
+        public IntPtr on_state_changed;
+
+        [NativeTypeName("void (*)(void *, float)")]
+        public IntPtr on_buffering_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_capability_t, libvlc_capability_t)")]
+        public IntPtr on_capabilities_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_time_t, double)")]
+        public IntPtr on_position_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_time_t)")]
+        public IntPtr on_length_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_list_action_t, libvlc_track_type_t, const char *)")]
+        public IntPtr on_track_list_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_track_type_t, const char *, const char *)")]
+        public IntPtr on_track_selection_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_list_action_t, int)")]
+        public IntPtr on_program_list_changed;
+
+        [NativeTypeName("void (*)(void *, int, int)")]
+        public IntPtr on_program_selection_changed;
+
+        [NativeTypeName("void (*)(void *)")]
+        public IntPtr on_titles_changed;
+
+        [NativeTypeName("void (*)(void *, const libvlc_title_description_t *, unsigned int)")]
+        public IntPtr on_title_selection_changed;
+
+        [NativeTypeName("void (*)(void *, const libvlc_title_description_t *, unsigned int, const libvlc_chapter_description_t *, unsigned int)")]
+        public IntPtr on_chapter_selection_changed;
+
+        [NativeTypeName("void (*)(void *, _Bool, const char *)")]
+        public IntPtr on_recording_changed;
+
+        [NativeTypeName("void (*)(void *, const char *)")]
+        public IntPtr on_screenshot_taken;
+
+        [NativeTypeName("void (*)(void *, libvlc_media_t *)")]
+        public IntPtr on_media_parsed;
+
+        [NativeTypeName("void (*)(void *, libvlc_media_t *)")]
+        public IntPtr on_media_meta_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_media_t *)")]
+        public IntPtr on_media_subitems_changed;
+
+        [NativeTypeName("void (*)(void *, libvlc_media_t *, libvlc_picture_list_t *)")]
+        public IntPtr on_media_attachments_added;
+
+        [NativeTypeName("void (*)(void *, unsigned int)")]
+        public IntPtr on_vout_changed;
+
+        [NativeTypeName("void (*)(void *, _Bool)")]
+        public IntPtr on_cork_changed;
+
+        [NativeTypeName("void (*)(void *, float)")]
+        public IntPtr on_audio_volume_changed;
+
+        [NativeTypeName("void (*)(void *, _Bool)")]
+        public IntPtr on_audio_mute_changed;
+
+        [NativeTypeName("void (*)(void *, const char *)")]
+        public IntPtr on_audio_device_changed;
     }
 
     public enum libvlc_video_color_primaries_t
@@ -606,44 +649,20 @@ namespace LibVLCSharp.Core.Interop
         public byte hardware_decoding;
     }
 
-    public unsafe partial struct libvlc_video_setup_device_info_t
+    public partial struct libvlc_video_setup_device_info_t
     {
-        [NativeTypeName("__AnonymousRecord_libvlc_media_player_L548_C5")]
-        public _Anonymous_e__Union Anonymous;
-
-        public ref _Anonymous_e__Union._d3d11_e__Struct d3d11
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->d3d11;
-                }
-            }
-        }
-
-        public ref _Anonymous_e__Union._d3d9_e__Struct d3d9
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->d3d9;
-                }
-            }
-        }
+        [NativeTypeName("union libvlc_video_setup_device_data")]
+        public libvlc_video_setup_device_data u;
 
         [StructLayout(LayoutKind.Explicit)]
-        public partial struct _Anonymous_e__Union
+        public partial struct libvlc_video_setup_device_data
         {
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L549_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L979_C9")]
             public _d3d11_e__Struct d3d11;
 
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L553_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L983_C9")]
             public _d3d9_e__Struct d3d9;
 
             public partial struct _d3d11_e__Struct
@@ -696,10 +715,10 @@ namespace LibVLCSharp.Core.Interop
         public IntPtr device;
     }
 
-    public unsafe partial struct libvlc_video_output_cfg_t
+    public partial struct libvlc_video_output_cfg_t
     {
-        [NativeTypeName("__AnonymousRecord_libvlc_media_player_L620_C5")]
-        public _Anonymous_e__Union Anonymous;
+        [NativeTypeName("union libvlc_video_output_format")]
+        public libvlc_video_output_format u;
 
         [NativeTypeName("_Bool")]
         public byte full_range;
@@ -712,68 +731,8 @@ namespace LibVLCSharp.Core.Interop
 
         public libvlc_video_orient_t orientation;
 
-        public ref int dxgi_format
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->dxgi_format;
-                }
-            }
-        }
-
-        public ref uint d3d9_format
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->d3d9_format;
-                }
-            }
-        }
-
-        public ref int opengl_format
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->opengl_format;
-                }
-            }
-        }
-
-        public ref IntPtr p_surface
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->p_surface;
-                }
-            }
-        }
-
-        public ref _Anonymous_e__Union._anw_e__Struct anw
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                fixed (_Anonymous_e__Union* pField = &Anonymous)
-                {
-                    return ref pField->anw;
-                }
-            }
-        }
-
         [StructLayout(LayoutKind.Explicit)]
-        public partial struct _Anonymous_e__Union
+        public partial struct libvlc_video_output_format
         {
             [FieldOffset(0)]
             public int dxgi_format;
@@ -790,7 +749,7 @@ namespace LibVLCSharp.Core.Interop
             public IntPtr p_surface;
 
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L631_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1061_C9")]
             public _anw_e__Struct anw;
 
             public partial struct _anw_e__Struct
@@ -1004,24 +963,30 @@ namespace LibVLCSharp.Core.Interop
 
         public double rate;
 
-        [NativeTypeName("int64_t")]
+        [NativeTypeName("libvlc_time_t")]
         public long ts_us;
 
-        [NativeTypeName("int64_t")]
+        [NativeTypeName("libvlc_time_t")]
         public long length_us;
 
-        [NativeTypeName("int64_t")]
+        [NativeTypeName("libvlc_time_t")]
         public long system_date_us;
     }
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public unsafe delegate void libvlc_media_player_watch_time_on_update([NativeTypeName("const libvlc_media_player_time_point_t *")] libvlc_media_player_time_point_t* value, [NativeTypeName("void*")] IntPtr data);
+    public partial struct libvlc_media_player_watch_time_cbs
+    {
+        [NativeTypeName("uint32_t")]
+        public uint version;
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void libvlc_media_player_watch_time_on_paused([NativeTypeName("int64_t")] long system_date_us, [NativeTypeName("void*")] IntPtr data);
+        [NativeTypeName("void (*)(void *, const libvlc_media_player_time_point_t *)")]
+        public IntPtr on_update;
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public unsafe delegate void libvlc_media_player_watch_time_on_seek([NativeTypeName("const libvlc_media_player_time_point_t *")] libvlc_media_player_time_point_t* value, [NativeTypeName("void*")] IntPtr data);
+        [NativeTypeName("void (*)(void *, libvlc_time_t)")]
+        public IntPtr on_paused;
+
+        [NativeTypeName("void (*)(void *, const libvlc_media_player_time_point_t *)")]
+        public IntPtr on_seek;
+    }
 
     public partial struct libvlc_media_list_player_t
     {
@@ -1057,429 +1022,16 @@ namespace LibVLCSharp.Core.Interop
     {
     }
 
-    public enum libvlc_event_e
+    public partial struct libvlc_media_discoverer_cbs
     {
-        libvlc_MediaMetaChanged = 0,
-        libvlc_MediaSubItemAdded,
-        libvlc_MediaDurationChanged,
-        libvlc_MediaParsedChanged,
-        libvlc_MediaSubItemTreeAdded = libvlc_MediaParsedChanged + 3,
-        libvlc_MediaThumbnailGenerated,
-        libvlc_MediaAttachedThumbnailsFound,
-        libvlc_MediaPlayerMediaChanged = 0x100,
-        libvlc_MediaPlayerNothingSpecial,
-        libvlc_MediaPlayerOpening,
-        libvlc_MediaPlayerBuffering,
-        libvlc_MediaPlayerPlaying,
-        libvlc_MediaPlayerPaused,
-        libvlc_MediaPlayerStopped,
-        libvlc_MediaPlayerForward,
-        libvlc_MediaPlayerBackward,
-        libvlc_MediaPlayerStopping,
-        libvlc_MediaPlayerEncounteredError,
-        libvlc_MediaPlayerTimeChanged,
-        libvlc_MediaPlayerPositionChanged,
-        libvlc_MediaPlayerSeekableChanged,
-        libvlc_MediaPlayerPausableChanged,
-        libvlc_MediaPlayerSnapshotTaken = libvlc_MediaPlayerPausableChanged + 2,
-        libvlc_MediaPlayerLengthChanged,
-        libvlc_MediaPlayerVout,
-        libvlc_MediaPlayerESAdded = libvlc_MediaPlayerVout + 2,
-        libvlc_MediaPlayerESDeleted,
-        libvlc_MediaPlayerESSelected,
-        libvlc_MediaPlayerCorked,
-        libvlc_MediaPlayerUncorked,
-        libvlc_MediaPlayerMuted,
-        libvlc_MediaPlayerUnmuted,
-        libvlc_MediaPlayerAudioVolume,
-        libvlc_MediaPlayerAudioDevice,
-        libvlc_MediaPlayerESUpdated,
-        libvlc_MediaPlayerProgramAdded,
-        libvlc_MediaPlayerProgramDeleted,
-        libvlc_MediaPlayerProgramSelected,
-        libvlc_MediaPlayerProgramUpdated,
-        libvlc_MediaPlayerTitleListChanged,
-        libvlc_MediaPlayerTitleSelectionChanged,
-        libvlc_MediaPlayerChapterChanged,
-        libvlc_MediaPlayerRecordChanged,
-        libvlc_MediaListItemAdded = 0x200,
-        libvlc_MediaListWillAddItem,
-        libvlc_MediaListItemDeleted,
-        libvlc_MediaListWillDeleteItem,
-        libvlc_MediaListEndReached,
-        libvlc_MediaListViewItemAdded = 0x300,
-        libvlc_MediaListViewWillAddItem,
-        libvlc_MediaListViewItemDeleted,
-        libvlc_MediaListViewWillDeleteItem,
-        libvlc_MediaListPlayerPlayed = 0x400,
-        libvlc_MediaListPlayerNextItemSet,
-        libvlc_MediaListPlayerStopped,
-        libvlc_RendererDiscovererItemAdded = 0x502,
-        libvlc_RendererDiscovererItemDeleted,
-        libvlc_MediaPlayerMediaStopping,
-    }
+        [NativeTypeName("uint32_t")]
+        public uint version;
 
-    public partial struct libvlc_event_t
-    {
-        public int type;
+        [NativeTypeName("void (*)(void *, libvlc_media_t *, libvlc_media_t *)")]
+        public IntPtr on_media_added;
 
-        [NativeTypeName("void*")]
-        public IntPtr p_obj;
-
-        [NativeTypeName("__AnonymousRecord_libvlc_events_L264_C5")]
-        public _u_e__Union u;
-
-        [StructLayout(LayoutKind.Explicit)]
-        public partial struct _u_e__Union
-        {
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L267_C9")]
-            public _media_meta_changed_e__Struct media_meta_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L271_C9")]
-            public _media_subitem_added_e__Struct media_subitem_added;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L275_C9")]
-            public _media_duration_changed_e__Struct media_duration_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L279_C9")]
-            public _media_parsed_changed_e__Struct media_parsed_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L283_C9")]
-            public _media_state_changed_e__Struct media_state_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L287_C9")]
-            public _media_thumbnail_generated_e__Struct media_thumbnail_generated;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L291_C9")]
-            public _media_subitemtree_added_e__Struct media_subitemtree_added;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L295_C9")]
-            public _media_attached_thumbnails_found_e__Struct media_attached_thumbnails_found;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L301_C9")]
-            public _media_player_buffering_e__Struct media_player_buffering;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L305_C9")]
-            public _media_player_chapter_changed_e__Struct media_player_chapter_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L309_C9")]
-            public _media_player_position_changed_e__Struct media_player_position_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L313_C9")]
-            public _media_player_time_changed_e__Struct media_player_time_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L317_C9")]
-            public _media_player_title_selection_changed_e__Struct media_player_title_selection_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L322_C9")]
-            public _media_player_seekable_changed_e__Struct media_player_seekable_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L326_C9")]
-            public _media_player_pausable_changed_e__Struct media_player_pausable_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L330_C9")]
-            public _media_player_scrambled_changed_e__Struct media_player_scrambled_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L334_C9")]
-            public _media_player_vout_e__Struct media_player_vout;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L340_C9")]
-            public _media_list_item_added_e__Struct media_list_item_added;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L345_C9")]
-            public _media_list_will_add_item_e__Struct media_list_will_add_item;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L350_C9")]
-            public _media_list_item_deleted_e__Struct media_list_item_deleted;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L355_C9")]
-            public _media_list_will_delete_item_e__Struct media_list_will_delete_item;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L362_C9")]
-            public _media_list_player_next_item_set_e__Struct media_list_player_next_item_set;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L368_C9")]
-            public _media_player_snapshot_taken_e__Struct media_player_snapshot_taken;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L374_C9")]
-            public _media_player_length_changed_e__Struct media_player_length_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L380_C9")]
-            public _media_player_media_changed_e__Struct media_player_media_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L385_C9")]
-            public _media_player_media_stopping_e__Struct media_player_media_stopping;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L392_C9")]
-            public _media_player_es_changed_e__Struct media_player_es_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L402_C9")]
-            public _media_player_es_selection_changed_e__Struct media_player_es_selection_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L410_C9")]
-            public _media_player_program_changed_e__Struct media_player_program_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L416_C9")]
-            public _media_player_program_selection_changed_e__Struct media_player_program_selection_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L422_C9")]
-            public _media_player_audio_volume_e__Struct media_player_audio_volume;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L427_C9")]
-            public _media_player_audio_device_e__Struct media_player_audio_device;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L432_C9")]
-            public _media_player_record_changed_e__Struct media_player_record_changed;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L439_C9")]
-            public _renderer_discoverer_item_added_e__Struct renderer_discoverer_item_added;
-
-            [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_events_L443_C9")]
-            public _renderer_discoverer_item_deleted_e__Struct renderer_discoverer_item_deleted;
-
-            public partial struct _media_meta_changed_e__Struct
-            {
-                public libvlc_meta_t meta_type;
-            }
-
-            public unsafe partial struct _media_subitem_added_e__Struct
-            {
-                public libvlc_media_t* new_child;
-            }
-
-            public partial struct _media_duration_changed_e__Struct
-            {
-                [NativeTypeName("int64_t")]
-                public long new_duration;
-            }
-
-            public partial struct _media_parsed_changed_e__Struct
-            {
-                public int new_status;
-            }
-
-            public partial struct _media_state_changed_e__Struct
-            {
-                public int new_state;
-            }
-
-            public unsafe partial struct _media_thumbnail_generated_e__Struct
-            {
-                public libvlc_picture_t* p_thumbnail;
-            }
-
-            public unsafe partial struct _media_subitemtree_added_e__Struct
-            {
-                public libvlc_media_t* item;
-            }
-
-            public unsafe partial struct _media_attached_thumbnails_found_e__Struct
-            {
-                public libvlc_picture_list_t* thumbnails;
-            }
-
-            public partial struct _media_player_buffering_e__Struct
-            {
-                public float new_cache;
-            }
-
-            public partial struct _media_player_chapter_changed_e__Struct
-            {
-                public int new_chapter;
-            }
-
-            public partial struct _media_player_position_changed_e__Struct
-            {
-                public double new_position;
-            }
-
-            public partial struct _media_player_time_changed_e__Struct
-            {
-                [NativeTypeName("libvlc_time_t")]
-                public long new_time;
-            }
-
-            public unsafe partial struct _media_player_title_selection_changed_e__Struct
-            {
-                [NativeTypeName("const libvlc_title_description_t *")]
-                public libvlc_title_description_t* title;
-
-                public int index;
-            }
-
-            public partial struct _media_player_seekable_changed_e__Struct
-            {
-                public int new_seekable;
-            }
-
-            public partial struct _media_player_pausable_changed_e__Struct
-            {
-                public int new_pausable;
-            }
-
-            public partial struct _media_player_scrambled_changed_e__Struct
-            {
-                public int new_scrambled;
-            }
-
-            public partial struct _media_player_vout_e__Struct
-            {
-                public int new_count;
-            }
-
-            public unsafe partial struct _media_list_item_added_e__Struct
-            {
-                public libvlc_media_t* item;
-
-                public int index;
-            }
-
-            public unsafe partial struct _media_list_will_add_item_e__Struct
-            {
-                public libvlc_media_t* item;
-
-                public int index;
-            }
-
-            public unsafe partial struct _media_list_item_deleted_e__Struct
-            {
-                public libvlc_media_t* item;
-
-                public int index;
-            }
-
-            public unsafe partial struct _media_list_will_delete_item_e__Struct
-            {
-                public libvlc_media_t* item;
-
-                public int index;
-            }
-
-            public unsafe partial struct _media_list_player_next_item_set_e__Struct
-            {
-                public libvlc_media_t* item;
-            }
-
-            public unsafe partial struct _media_player_snapshot_taken_e__Struct
-            {
-                [NativeTypeName("char *")]
-                public byte* psz_filename;
-            }
-
-            public partial struct _media_player_length_changed_e__Struct
-            {
-                [NativeTypeName("libvlc_time_t")]
-                public long new_length;
-            }
-
-            public unsafe partial struct _media_player_media_changed_e__Struct
-            {
-                public libvlc_media_t* new_media;
-            }
-
-            public unsafe partial struct _media_player_media_stopping_e__Struct
-            {
-                public libvlc_media_t* media;
-            }
-
-            public unsafe partial struct _media_player_es_changed_e__Struct
-            {
-                public libvlc_track_type_t i_type;
-
-                public int i_id;
-
-                [NativeTypeName("const char *")]
-                public byte* psz_id;
-            }
-
-            public unsafe partial struct _media_player_es_selection_changed_e__Struct
-            {
-                public libvlc_track_type_t i_type;
-
-                [NativeTypeName("const char *")]
-                public byte* psz_unselected_id;
-
-                [NativeTypeName("const char *")]
-                public byte* psz_selected_id;
-            }
-
-            public partial struct _media_player_program_changed_e__Struct
-            {
-                public int i_id;
-            }
-
-            public partial struct _media_player_program_selection_changed_e__Struct
-            {
-                public int i_unselected_id;
-
-                public int i_selected_id;
-            }
-
-            public partial struct _media_player_audio_volume_e__Struct
-            {
-                public float volume;
-            }
-
-            public unsafe partial struct _media_player_audio_device_e__Struct
-            {
-                [NativeTypeName("const char *")]
-                public byte* device;
-            }
-
-            public unsafe partial struct _media_player_record_changed_e__Struct
-            {
-                [NativeTypeName("_Bool")]
-                public byte recording;
-
-                [NativeTypeName("const char *")]
-                public byte* recorded_file_path;
-            }
-
-            public unsafe partial struct _renderer_discoverer_item_added_e__Struct
-            {
-                public libvlc_renderer_item_t* item;
-            }
-
-            public unsafe partial struct _renderer_discoverer_item_deleted_e__Struct
-            {
-                public libvlc_renderer_item_t* item;
-            }
-        }
+        [NativeTypeName("void (*)(void *, libvlc_media_t *)")]
+        public IntPtr on_media_removed;
     }
 
     public partial struct libvlc_dialog_id
@@ -1495,6 +1047,9 @@ namespace LibVLCSharp.Core.Interop
 
     public partial struct libvlc_dialog_cbs
     {
+        [NativeTypeName("uint32_t")]
+        public uint version;
+
         [NativeTypeName("void (*)(void *, libvlc_dialog_id *, const char *, const char *, const char *, _Bool)")]
         public IntPtr pf_display_login;
 
@@ -1557,12 +1112,6 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_free([NativeTypeName("void*")] IntPtr ptr);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern int libvlc_event_attach(libvlc_event_manager_t* p_event_manager, [NativeTypeName("libvlc_event_type_t")] int i_event_type, [NativeTypeName("libvlc_callback_t")] IntPtr f_callback, [NativeTypeName("void*")] IntPtr user_data);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void libvlc_event_detach(libvlc_event_manager_t* p_event_manager, [NativeTypeName("libvlc_event_type_t")] int i_event_type, [NativeTypeName("libvlc_callback_t")] IntPtr f_callback, [NativeTypeName("void*")] IntPtr p_user_data);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_log_get_context([NativeTypeName("const libvlc_log_t *")] libvlc_log_t* ctx, [NativeTypeName("const char **")] byte** module, [NativeTypeName("const char **")] byte** file, [NativeTypeName("unsigned int *")] uint* line);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -1587,11 +1136,11 @@ namespace LibVLCSharp.Core.Interop
         public static extern libvlc_module_description_t* libvlc_video_filter_list_get(libvlc_instance_t* p_instance);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        [return: NativeTypeName("int64_t")]
+        [return: NativeTypeName("libvlc_time_t")]
         public static extern long libvlc_clock();
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_renderer_item_t* libvlc_renderer_item_hold(libvlc_renderer_item_t* p_item);
+        public static extern libvlc_renderer_item_t* libvlc_renderer_item_retain(libvlc_renderer_item_t* p_item);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_renderer_item_release(libvlc_renderer_item_t* p_item);
@@ -1612,19 +1161,16 @@ namespace LibVLCSharp.Core.Interop
         public static extern int libvlc_renderer_item_flags([NativeTypeName("const libvlc_renderer_item_t *")] libvlc_renderer_item_t* p_item);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_renderer_discoverer_t* libvlc_renderer_discoverer_new(libvlc_instance_t* p_inst, [NativeTypeName("const char *")] byte* psz_name);
+        public static extern libvlc_renderer_discoverer_t* libvlc_renderer_discoverer_new(libvlc_instance_t* p_inst, [NativeTypeName("const char *")] byte* psz_name, [NativeTypeName("const struct libvlc_renderer_discoverer_cbs *")] libvlc_renderer_discoverer_cbs* cbs, [NativeTypeName("void*")] IntPtr cbs_opaque);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void libvlc_renderer_discoverer_release(libvlc_renderer_discoverer_t* p_rd);
+        public static extern void libvlc_renderer_discoverer_destroy(libvlc_renderer_discoverer_t* p_rd);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern int libvlc_renderer_discoverer_start(libvlc_renderer_discoverer_t* p_rd);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_renderer_discoverer_stop(libvlc_renderer_discoverer_t* p_rd);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_event_manager_t* libvlc_renderer_discoverer_event_manager(libvlc_renderer_discoverer_t* p_rd);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         [return: NativeTypeName("size_t")]
@@ -1686,7 +1232,7 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_media_tracklist_delete(libvlc_media_tracklist_t* list);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_track_t* libvlc_media_track_hold(libvlc_media_track_t* track);
+        public static extern libvlc_media_track_t* libvlc_media_track_retain(libvlc_media_track_t* track);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_track_release(libvlc_media_track_t* track);
@@ -1704,7 +1250,7 @@ namespace LibVLCSharp.Core.Interop
         public static extern libvlc_media_t* libvlc_media_new_fd(int fd);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_t* libvlc_media_new_callbacks([NativeTypeName("libvlc_media_open_cb")] IntPtr open_cb, [NativeTypeName("libvlc_media_read_cb")] IntPtr read_cb, [NativeTypeName("libvlc_media_seek_cb")] IntPtr seek_cb, [NativeTypeName("libvlc_media_close_cb")] IntPtr close_cb, [NativeTypeName("void*")] IntPtr opaque);
+        public static extern libvlc_media_t* libvlc_media_new_callbacks([NativeTypeName("const struct libvlc_media_open_cbs *")] libvlc_media_open_cbs* cbs, [NativeTypeName("void*")] IntPtr cbs_opaque);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern libvlc_media_t* libvlc_media_new_as_node([NativeTypeName("const char *")] byte* psz_name);
@@ -1761,9 +1307,6 @@ namespace LibVLCSharp.Core.Interop
         public static extern libvlc_media_list_t* libvlc_media_subitems(libvlc_media_t* p_md);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_event_manager_t* libvlc_media_event_manager(libvlc_media_t* p_md);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         [return: NativeTypeName("libvlc_time_t")]
         public static extern long libvlc_media_get_duration(libvlc_media_t* p_md);
 
@@ -1771,13 +1314,8 @@ namespace LibVLCSharp.Core.Interop
         public static extern int libvlc_media_get_filestat(libvlc_media_t* p_md, [NativeTypeName("unsigned int")] uint type, [NativeTypeName("uint64_t *")] ulong* @out);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern int libvlc_media_parse_request(libvlc_instance_t* inst, libvlc_media_t* p_md, libvlc_media_parse_flag_t parse_flag, int timeout);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void libvlc_media_parse_stop(libvlc_instance_t* inst, libvlc_media_t* p_md);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_parsed_status_t libvlc_media_get_parsed_status(libvlc_media_t* p_md);
+        [return: NativeTypeName("_Bool")]
+        public static extern byte libvlc_media_is_parsed(libvlc_media_t* p_md);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_set_user_data(libvlc_media_t* p_md, [NativeTypeName("void*")] IntPtr p_new_user_data);
@@ -1797,15 +1335,6 @@ namespace LibVLCSharp.Core.Interop
         public static extern libvlc_media_type_t libvlc_media_get_type(libvlc_media_t* p_md);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_thumbnail_request_t* libvlc_media_thumbnail_request_by_time(libvlc_instance_t* inst, libvlc_media_t* md, [NativeTypeName("libvlc_time_t")] long time, libvlc_thumbnailer_seek_speed_t speed, [NativeTypeName("unsigned int")] uint width, [NativeTypeName("unsigned int")] uint height, [NativeTypeName("_Bool")] byte crop, libvlc_picture_type_t picture_type, [NativeTypeName("libvlc_time_t")] long timeout);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_thumbnail_request_t* libvlc_media_thumbnail_request_by_pos(libvlc_instance_t* inst, libvlc_media_t* md, double pos, libvlc_thumbnailer_seek_speed_t speed, [NativeTypeName("unsigned int")] uint width, [NativeTypeName("unsigned int")] uint height, [NativeTypeName("_Bool")] byte crop, libvlc_picture_type_t picture_type, [NativeTypeName("libvlc_time_t")] long timeout);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void libvlc_media_thumbnail_request_destroy(libvlc_media_thumbnail_request_t* p_req);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern int libvlc_media_slaves_add(libvlc_media_t* p_md, libvlc_media_slave_type_t i_type, [NativeTypeName("unsigned int")] uint i_priority, [NativeTypeName("const char *")] byte* psz_uri);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -1822,10 +1351,10 @@ namespace LibVLCSharp.Core.Interop
         public const int libvlc_title_interactive = 0x02;
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_player_t* libvlc_media_player_new(libvlc_instance_t* p_libvlc_instance);
+        public static extern libvlc_media_player_t* libvlc_media_player_new(libvlc_instance_t* p_libvlc_instance, [NativeTypeName("const struct libvlc_media_player_cbs *")] libvlc_media_player_cbs* cbs, [NativeTypeName("void*")] IntPtr cbs_opaque);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_player_t* libvlc_media_player_new_from_media(libvlc_instance_t* inst, libvlc_media_t* p_md);
+        public static extern libvlc_media_player_t* libvlc_media_player_new_from_media(libvlc_instance_t* inst, libvlc_media_t* p_md, [NativeTypeName("const struct libvlc_media_player_cbs *")] libvlc_media_player_cbs* cbs, [NativeTypeName("void*")] IntPtr cbs_opaque);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_player_release(libvlc_media_player_t* p_mi);
@@ -1840,7 +1369,10 @@ namespace LibVLCSharp.Core.Interop
         public static extern libvlc_media_t* libvlc_media_player_get_media(libvlc_media_player_t* p_mi);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_event_manager_t* libvlc_media_player_event_manager(libvlc_media_player_t* p_mi);
+        public static extern void libvlc_media_player_set_next_media(libvlc_media_player_t* p_mi, libvlc_media_t* p_md);
+
+        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern libvlc_media_t* libvlc_media_player_get_next_media(libvlc_media_player_t* p_mi);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         [return: NativeTypeName("_Bool")]
@@ -1955,7 +1487,7 @@ namespace LibVLCSharp.Core.Interop
         public static extern int libvlc_media_player_get_chapter_count_for_title(libvlc_media_player_t* p_mi, int i_title);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void libvlc_media_player_set_title(libvlc_media_player_t* p_mi, int i_title);
+        public static extern void libvlc_media_player_set_title(libvlc_media_player_t* p_mi, [NativeTypeName("unsigned int")] uint i_title);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern int libvlc_media_player_get_title(libvlc_media_player_t* p_mi);
@@ -2106,7 +1638,7 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_video_set_video_stereo_mode(libvlc_media_player_t* p_mi, [NativeTypeName("const libvlc_video_stereo_mode_t")] libvlc_video_stereo_mode_t i_mode);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        [return: NativeTypeName("int64_t")]
+        [return: NativeTypeName("libvlc_time_t")]
         public static extern long libvlc_video_get_spu_delay(libvlc_media_player_t* p_mi);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -2116,7 +1648,7 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_video_set_spu_text_scale(libvlc_media_player_t* p_mi, float f_scale);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern int libvlc_video_set_spu_delay(libvlc_media_player_t* p_mi, [NativeTypeName("int64_t")] long i_delay);
+        public static extern int libvlc_video_set_spu_delay(libvlc_media_player_t* p_mi, [NativeTypeName("libvlc_time_t")] long i_delay);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern int libvlc_media_player_get_full_title_descriptions(libvlc_media_player_t* p_mi, libvlc_title_description_t*** titles);
@@ -2247,11 +1779,11 @@ namespace LibVLCSharp.Core.Interop
         public static extern int libvlc_audio_set_mixmode(libvlc_media_player_t* p_mi, libvlc_audio_output_mixmode_t mode);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        [return: NativeTypeName("int64_t")]
+        [return: NativeTypeName("libvlc_time_t")]
         public static extern long libvlc_audio_get_delay(libvlc_media_player_t* p_mi);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern int libvlc_audio_set_delay(libvlc_media_player_t* p_mi, [NativeTypeName("int64_t")] long i_delay);
+        public static extern int libvlc_audio_set_delay(libvlc_media_player_t* p_mi, [NativeTypeName("libvlc_time_t")] long i_delay);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         [return: NativeTypeName("unsigned int")]
@@ -2302,17 +1834,17 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_media_player_record(libvlc_media_player_t* p_mi, [NativeTypeName("_Bool")] byte enable, [NativeTypeName("const char *")] byte* dir_path);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern int libvlc_media_player_watch_time(libvlc_media_player_t* p_mi, [NativeTypeName("int64_t")] long min_period_us, [NativeTypeName("libvlc_media_player_watch_time_on_update")] IntPtr on_update, [NativeTypeName("libvlc_media_player_watch_time_on_paused")] IntPtr on_paused, [NativeTypeName("libvlc_media_player_watch_time_on_seek")] IntPtr on_seek, [NativeTypeName("void*")] IntPtr cbs_data);
+        public static extern int libvlc_media_player_watch_time(libvlc_media_player_t* p_mi, [NativeTypeName("libvlc_time_t")] long min_period_us, [NativeTypeName("const struct libvlc_media_player_watch_time_cbs *")] libvlc_media_player_watch_time_cbs* cbs, [NativeTypeName("void*")] IntPtr cbs_opaque);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_player_unwatch_time(libvlc_media_player_t* p_mi);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern int libvlc_media_player_time_point_interpolate([NativeTypeName("const libvlc_media_player_time_point_t *")] libvlc_media_player_time_point_t* point, [NativeTypeName("int64_t")] long system_now_us, [NativeTypeName("int64_t *")] long* out_ts_us, double* out_pos);
+        public static extern int libvlc_media_player_time_point_interpolate([NativeTypeName("const libvlc_media_player_time_point_t *")] libvlc_media_player_time_point_t* point, [NativeTypeName("libvlc_time_t")] long system_now_us, [NativeTypeName("libvlc_time_t *")] long* out_ts_us, double* out_pos);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        [return: NativeTypeName("int64_t")]
-        public static extern long libvlc_media_player_time_point_get_next_date([NativeTypeName("const libvlc_media_player_time_point_t *")] libvlc_media_player_time_point_t* point, [NativeTypeName("int64_t")] long system_now_us, [NativeTypeName("int64_t")] long interpolated_ts_us, [NativeTypeName("int64_t")] long next_interval_us);
+        [return: NativeTypeName("libvlc_time_t")]
+        public static extern long libvlc_media_player_time_point_get_next_date([NativeTypeName("const libvlc_media_player_time_point_t *")] libvlc_media_player_time_point_t* point, [NativeTypeName("libvlc_time_t")] long system_now_us, [NativeTypeName("libvlc_time_t")] long interpolated_ts_us, [NativeTypeName("libvlc_time_t")] long next_interval_us);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_player_lock(libvlc_media_player_t* mp);
@@ -2370,22 +1902,13 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_media_list_unlock(libvlc_media_list_t* p_ml);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_event_manager_t* libvlc_media_list_event_manager(libvlc_media_list_t* p_ml);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_list_player_t* libvlc_media_list_player_new(libvlc_instance_t* p_instance);
+        public static extern libvlc_media_list_player_t* libvlc_media_list_player_new(libvlc_instance_t* p_instance, [NativeTypeName("const struct libvlc_media_player_cbs *")] libvlc_media_player_cbs* cbs, [NativeTypeName("void*")] IntPtr cbs_opaque);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_list_player_release(libvlc_media_list_player_t* p_mlp);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern libvlc_media_list_player_t* libvlc_media_list_player_retain(libvlc_media_list_player_t* p_mlp);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_event_manager_t* libvlc_media_list_player_event_manager(libvlc_media_list_player_t* p_mlp);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void libvlc_media_list_player_set_media_player(libvlc_media_list_player_t* p_mlp, libvlc_media_player_t* p_mi);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern libvlc_media_player_t* libvlc_media_list_player_get_media_player(libvlc_media_list_player_t* p_mlp);
@@ -2428,7 +1951,7 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_media_list_player_set_playback_mode(libvlc_media_list_player_t* p_mlp, libvlc_playback_mode_t e_mode);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_discoverer_t* libvlc_media_discoverer_new(libvlc_instance_t* p_inst, [NativeTypeName("const char *")] byte* psz_name);
+        public static extern libvlc_media_discoverer_t* libvlc_media_discoverer_new(libvlc_instance_t* p_inst, [NativeTypeName("const char *")] byte* psz_name, [NativeTypeName("const struct libvlc_media_discoverer_cbs *")] libvlc_media_discoverer_cbs* cbs, [NativeTypeName("void*")] IntPtr cbs_opaque);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern int libvlc_media_discoverer_start(libvlc_media_discoverer_t* p_mdis);
@@ -2437,10 +1960,7 @@ namespace LibVLCSharp.Core.Interop
         public static extern void libvlc_media_discoverer_stop(libvlc_media_discoverer_t* p_mdis);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void libvlc_media_discoverer_release(libvlc_media_discoverer_t* p_mdis);
-
-        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern libvlc_media_list_t* libvlc_media_discoverer_media_list(libvlc_media_discoverer_t* p_mdis);
+        public static extern void libvlc_media_discoverer_destroy(libvlc_media_discoverer_t* p_mdis);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         [return: NativeTypeName("_Bool")]
@@ -2516,9 +2036,6 @@ namespace LibVLCSharp.Core.Interop
 
         [NativeTypeName("#define VLC_LIBVLC_MEDIA_DISCOVERER_H 1")]
         public const int VLC_LIBVLC_MEDIA_DISCOVERER_H = 1;
-
-        [NativeTypeName("#define LIBVLC_EVENTS_H 1")]
-        public const int LIBVLC_EVENTS_H = 1;
 
         [NativeTypeName("#define LIBVLC_DIALOG_H 1")]
         public const int LIBVLC_DIALOG_H = 1;
