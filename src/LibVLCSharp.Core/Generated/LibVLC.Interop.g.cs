@@ -581,6 +581,12 @@ namespace LibVLCSharp.Core.Interop
         [NativeTypeName("void (*)(void *, libvlc_media_t *, libvlc_picture_list_t *)")]
         public IntPtr on_media_attachments_added;
 
+        [NativeTypeName("void (*)(void *, int)")]
+        public IntPtr on_next_frame_status;
+
+        [NativeTypeName("void (*)(void *, int)")]
+        public IntPtr on_prev_frame_status;
+
         [NativeTypeName("void (*)(void *, unsigned int)")]
         public IntPtr on_vout_changed;
 
@@ -658,11 +664,11 @@ namespace LibVLCSharp.Core.Interop
         public partial struct libvlc_video_setup_device_data
         {
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L979_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1020_C9")]
             public _d3d11_e__Struct d3d11;
 
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L983_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1024_C9")]
             public _d3d9_e__Struct d3d9;
 
             public partial struct _d3d11_e__Struct
@@ -749,7 +755,7 @@ namespace LibVLCSharp.Core.Interop
             public IntPtr p_surface;
 
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1061_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1102_C9")]
             public _anw_e__Struct anw;
 
             public partial struct _anw_e__Struct
@@ -1528,6 +1534,9 @@ namespace LibVLCSharp.Core.Interop
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_player_next_frame(libvlc_media_player_t* p_mi);
+
+        [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern void libvlc_media_player_previous_frame(libvlc_media_player_t* p_mi);
 
         [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void libvlc_media_player_navigate(libvlc_media_player_t* p_mi, [NativeTypeName("unsigned int")] uint navigate);
