@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>4.0.0-nightly.202607210405</Version>
+    <Version>4.0.0-nightly.202607220405</Version>
     <Authors>IOL0ol1</Authors>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PackageTags>vlc, libvlc, libvlcsharp</PackageTags>
