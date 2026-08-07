@@ -272,6 +272,7 @@ namespace LibVLCSharp.Core.Interop
         libvlc_meta_AlbumArtist,
         libvlc_meta_DiscNumber,
         libvlc_meta_DiscTotal,
+        libvlc_meta_Compilation,
     }
 
     public enum libvlc_state_t
