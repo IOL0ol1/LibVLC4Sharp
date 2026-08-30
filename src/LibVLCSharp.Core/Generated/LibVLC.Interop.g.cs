@@ -534,6 +534,9 @@ namespace LibVLCSharp.Core.Interop
         [NativeTypeName("void (*)(void *, float)")]
         public IntPtr on_buffering_changed;
 
+        [NativeTypeName("void (*)(void *, float)")]
+        public IntPtr on_rate_changed;
+
         [NativeTypeName("void (*)(void *, libvlc_capability_t, libvlc_capability_t)")]
         public IntPtr on_capabilities_changed;
 
@@ -665,11 +668,11 @@ namespace LibVLCSharp.Core.Interop
         public partial struct libvlc_video_setup_device_data
         {
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1020_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1031_C9")]
             public _d3d11_e__Struct d3d11;
 
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1024_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1035_C9")]
             public _d3d9_e__Struct d3d9;
 
             public partial struct _d3d11_e__Struct
@@ -756,7 +759,7 @@ namespace LibVLCSharp.Core.Interop
             public IntPtr p_surface;
 
             [FieldOffset(0)]
-            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1102_C9")]
+            [NativeTypeName("__AnonymousRecord_libvlc_media_player_L1113_C9")]
             public _anw_e__Struct anw;
 
             public partial struct _anw_e__Struct
