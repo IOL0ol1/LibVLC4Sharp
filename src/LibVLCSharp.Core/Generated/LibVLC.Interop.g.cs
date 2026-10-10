@@ -869,7 +869,7 @@ namespace LibVLCSharp.Core.Interop
     public delegate void libvlc_audio_resume_cb([NativeTypeName("void*")] IntPtr data, [NativeTypeName("int64_t")] long pts);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void libvlc_audio_flush_cb([NativeTypeName("void*")] IntPtr data, [NativeTypeName("int64_t")] long pts);
+    public delegate void libvlc_audio_flush_cb([NativeTypeName("void*")] IntPtr data);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void libvlc_audio_drain_cb([NativeTypeName("void*")] IntPtr data);
