@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <RootNamespace>LibVLCSharp.WPF.Sample</RootNamespace>
+    <!-- Sample app: not a NuGet package. -->
+    <IsPackable>false</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LibVLCSharp.WPF\LibVLCSharp.WPF.csproj" />
+  </ItemGroup>
+
+  <!--
+    No LibVLC 4.x NuGet exists (VideoLAN.LibVLC.Windows is 3.x only, which lacks the output-callbacks
+    API). Instead, auto-download the official 4.0 nightly into <out>\libvlc\win-x64 on first build so
+    LibVLC.Initialize() discovers it. One-time (guarded by the Exists check); opt out with
+    -p:FetchLibVLC=false. Requires internet on first build (~100 MB).
+  -->
+  <Target Name="FetchLibVLC" BeforeTargets="Build" Condition="'$(FetchLibVLC)' != 'false' and !Exists('$(MSBuildProjectDirectory)\$(OutDir)libvlc\win-x64\libvlc.dll')">
+    <Message Importance="high" Text="Fetching LibVLC 4.x nightly (one-time)…" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\tools\fetch-libvlc.ps1&quot; -Dest &quot;$(MSBuildProjectDirectory)\$(OutDir)libvlc\win-x64&quot;" />
+  </Target>
+
+</Project>

@@ -1,0 +1,31 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LibVLCSharp.Core.Generator/LibVLCSharp.Core.Generator.csproj" />
+    <Project Path="src/LibVLCSharp.Core/LibVLCSharp.Core.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/LibVLCSharp.WPF/LibVLCSharp.WPF.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/tools/">
+    <File Path="tools/fetch-headers.ps1" />
+    <File Path="tools/fetch-libvlc.ps1" />
+    <File Path="tools/generate.ps1" />
+    <File Path="tools/generate.rsp" />
+  </Folder>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/samples/">
+    <Project Path="samples/LibVLCSharp.WPF.Sample/LibVLCSharp.WPF.Sample.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/solution/">
+    <File Path="Directory.Build.props" />
+    <File Path="README.md" />
+    <File Path=".config/dotnet-tools.json" />
+  </Folder>
+</Solution>

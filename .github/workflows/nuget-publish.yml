@@ -1,0 +1,87 @@
+name: NuGet Publish
+
+# Builds the packable projects (LibVLC4Sharp.Core + LibVLC4Sharp.WPF) in Release
+# and pushes the resulting .nupkg/.snupkg to nuget.org.
+#
+# Triggers:
+#   - push of a v* tag           -> publishes whatever is committed at that tag
+#   - manual workflow_dispatch   -> publishes the default branch
+#   - workflow_call (reusable)   -> invoked by check-vlc-update.yml after it tags a new version
+#
+# Auth: NuGet Trusted Publishing (OIDC). No long-lived API key secret is needed.
+# The job runs in the `production` environment and exchanges a GitHub OIDC token
+# for a short-lived nuget.org API key via the NuGet/login action. This requires a
+# matching trusted publishing policy on nuget.org:
+#   Owner: IOL0ol1  Repo: LibVLC4Sharp  Workflow: nuget-publish.yml  Environment: production
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref (tag/branch/sha) to build & publish'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write   # required to request the GitHub OIDC token for trusted publishing
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    # Must match the Environment configured in the nuget.org trusted publishing policy.
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Empty for push/dispatch (uses the triggering ref); set by check-vlc-update.yml
+          # to the freshly created tag so we build the committed, regenerated bindings.
+          ref: ${{ inputs.ref }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      # Build the whole solution in Release. Packable projects (Core + WPF) emit
+      # their .nupkg/.snupkg into nupkgs/ via GeneratePackageOnBuild
+      # (Directory.Build.props); the sample/generator are IsPackable=false and so
+      # produce no package. FetchLibVLC=false skips the sample's ~100 MB libvlc
+      # nightly download, which is a runtime-only asset and not needed to compile.
+      - name: Build & pack (Release)
+        run: dotnet build LibVLC4Sharp.slnx --configuration Release -p:FetchLibVLC=false
+
+      - name: List packages
+        shell: pwsh
+        run: Get-ChildItem -Path nupkgs -Filter *.nupkg -Recurse | Select-Object FullName
+
+      # Exchange the GitHub OIDC token for a short-lived nuget.org API key.
+      # The temp key is valid for ~1 hour, so this runs immediately before the push.
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: kiolp   # nuget.org account/profile name that owns the trusted publishing policy
+
+      - name: Push to NuGet
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          if (-not $env:NUGET_API_KEY) { throw 'Failed to obtain a NuGet API key from trusted publishing.' }
+          $pkgs = Get-ChildItem -Path nupkgs -Filter *.nupkg -Recurse
+          if ($pkgs.Count -eq 0) { throw 'No .nupkg files were produced.' }
+          foreach ($pkg in $pkgs) {
+            # Pushing the .nupkg also uploads the matching .snupkg symbols package.
+            dotnet nuget push $pkg.FullName `
+              --api-key $env:NUGET_API_KEY `
+              --source https://api.nuget.org/v3/index.json `
+              --skip-duplicate
+          }
